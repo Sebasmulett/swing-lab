@@ -2,11 +2,11 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.5";
+const VERSION="0.6";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
@@ -22,16 +22,19 @@ const launch=(c,ms,h,lie)=>SL.launchFor(c,ms,h,lie,S.hand);
 const median=a=>{ const r=a.slice().sort((x,y)=>x-y), m=r.length>>1; return r.length%2?r[m]:(r[m-1]+r[m])/2; };
 const fcache=new Map();
 // Calibración: 1) radar si hay; 2) tus distancias habituales (con al menos 3 swings reales de ese palo); 3) ninguna
-function factor(c){ const p=calib[c]||[]; if(p.length) return median(p.map(x=>x.radar/x.est));
-  const mc=myCarry[c], mine=history.filter(h=>h.club===c && !h.sim).slice(0,12);
+// sensor y cámara se calibran por separado: cada uno mide distinto
+const srcOf=h=>h && h.source==="camera"?"camera":"sensor";
+const realOf=(c,src)=>history.filter(h=>h.club===c && !h.sim && srcOf(h)===src);
+function factor(c,src="sensor"){ const p=calib[c]||[]; if(src==="sensor" && p.length) return median(p.map(x=>x.radar/x.est));
+  const mc=myCarry[c], mine=realOf(c,src).slice(0,12);
   if(!mc || mine.length<3) return 1;
-  const key=c+"|"+mc+"|"+mine.length+"|"+(mine[0]&&mine[0].id); if(fcache.has(key)) return fcache.get(key);
+  const key=c+"|"+src+"|"+mc+"|"+mine.length+"|"+(mine[0]&&mine[0].id); if(fcache.has(key)) return fcache.get(key);
   let lo=5, hi=80; for(let i=0;i<24;i++){ const mid=(lo+hi)/2, sm=SL.simulateLocal(SL.launchFor(c,mid,null,"tee",S.hand),[0,0],null); if(sm.carry<mc) lo=mid; else hi=mid; }
   const f=Math.max(0.5,Math.min(2,((lo+hi)/2)/median(mine.map(h=>h.msRaw)))); fcache.set(key,f); return f; }
-const calibKind=c=>(calib[c]||[]).length?"radar":(myCarry[c] && history.filter(h=>h.club===c && !h.sim).length>=3)?"distancias":null;
+const calibKind=(c,src="sensor")=>src==="sensor"&&(calib[c]||[]).length?"radar":(myCarry[c] && realOf(c,src).length>=3)?"distancias":null;
 const dcache=new Map();
 function derive(h){
-  const ms=h.msRaw*factor(h.club), key=h.id+"|"+ms.toFixed(3)+"|"+S.hand; if(dcache.has(key)) return dcache.get(key);
+  const ms=h.msRaw*factor(h.club,srcOf(h)), key=h.id+"|"+ms.toFixed(3)+"|"+S.hand; if(dcache.has(key)) return dcache.get(key);
   const sim=SL.simulateLocal(launch(h.club,ms,h,"tee"),[0,0],null);
   const out={ms, carry:sim.carry, total:Math.hypot(sim.x,sim.z), lat:sim.x, latLand:sim.landX, apex:sim.apex, ball:sim.ball, launch:sim.launch, spin:sim.spin};
   dcache.set(key,out); if(dcache.size>800) dcache.clear(); return out;
@@ -88,10 +91,11 @@ function setupRange(){ if(!has3D) return; World.setRange({um:S.dist==="yd"?0.914
 function rangeShot(h){
   const dv=derive(h), sim=SL.simulateLocal(launch(h.club,dv.ms,h,"tee"),[0,0],null);
   const pts=toWorld(sim.pts,0,0,0), seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false;
+  camLayer(false);
   World.playShot({pts, landT:sim.landT, onLand:sfx.land, onEnd:()=>{
     $("skip").hidden=true; rangeMarks.push({x:+sim.x.toFixed(1),z:+sim.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
     World.setMarks(rangeMarks); showCard(sim); renderHud(); const sh=shapeName(h); if(sh) setHudMsg(sh);
-    setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range") World.address(0,0,0,true); },3800); }});
+    setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range"){ World.address(0,0,0,true); camLayer(true); } },3800); }});
 }
 
 // ================= Campo =================
@@ -106,11 +110,11 @@ let builtHole=-1;
 function setupHole(announce){
   if(has3D){ if(builtHole!==course.hole || announce){ World.setHole(HOLES[course.hole]); builtHole=course.hole; }
     World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.address(course.ball.x,course.ball.z,holeYaw(),true); }
-  suggestClub(); renderHud(); drawMini();
+  suggestClub(); renderHud(); drawMini(); camLayer(true);
   if(announce){ const h=HOLES[course.hole], w=course.wind[course.hole];
     say(`Hoyo ${course.hole+1}, par ${h.par}, ${sayDist(h.L)}.`+(w.s>0.3?` Viento de ${Math.round(w.s)} metros por segundo.`:" Sin viento.")); }
 }
-function expectedTotal(c,lie){ const mine=history.filter(h=>h.club===c), ms=mine.length?mine.slice(0,10).reduce((a,h)=>a+h.msRaw*factor(c),0)/Math.min(10,mine.length):CLUBS[c].def;
+function expectedTotal(c,lie){ const mine=history.filter(h=>h.club===c && !h.sim), ms=mine.length?mine.slice(0,10).reduce((a,h)=>a+h.msRaw*factor(c,srcOf(h)),0)/Math.min(10,mine.length):CLUBS[c].def;
   const s=SL.simulateLocal(launch(c,ms,null,lie),[0,0],null); return Math.hypot(s.x,s.z); }
 function suggestClub(){
   if(mode!=="course" || !course || course.holed){ suggested=null; renderChips(); return; }
@@ -139,6 +143,7 @@ function courseShot(h){
   const endLie = sim.landG==="water"||sim.landG==="ob" ? sim.landG : SL.lieAt(hole,fx,fz);
   const line=pts.filter(p=>p.t<=sim.landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
   const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false;
+  camLayer(false);
   World.playShot({pts, landT:sim.landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
     $("skip").hidden=true; showCard(sim);
     course.lines.push(line); World.setLines(course.lines);
@@ -208,6 +213,12 @@ function drawMini(){
 
 // ================= Panel de datos =================
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function postureTips(po){ const t=[];
+  if(Math.abs(po.head)>=8) t.push(`Tu cabeza se movió ${Math.abs(po.head)} cm ${po.head>0?"hacia el objetivo":"hacia atrás"} antes del impacto: intenta mantenerla quieta.`);
+  if(po.sway<=-10) t.push(`Tu cadera se deslizó ${-po.sway} cm hacia atrás en la subida: gira sin desplazarte.`);
+  if(po.shTurn<60) t.push(`Giraste los hombros unos ${po.shTurn}°: un giro más completo da más distancia.`);
+  else if(po.shTurn>=75) t.push(`Buen giro de hombros (unos ${po.shTurn}°).`);
+  return t; }
 function verdictFor(h){
   const p=[];
   if(h.ratio==null) p.push("Medí la velocidad, pero no pude separar la subida de la bajada para calcular el tempo.");
@@ -218,6 +229,7 @@ function verdictFor(h){
     if(h.arcFin!=null && h.arcFin<h.arcTop*0.6) p.push("Frenaste el final: termina el swing con las manos arriba."); }
   const sh=shapeName(h); if(sh) p.push(`<em>${sh}.</em> Cara ${fmtFace(h).toLowerCase()}`+(h.pathOk?`, ruta ${fmtPath(h).toLowerCase()}.`:"."));
   if(h.sat) p.push(h.method==="fit"?"El sensor topó y reconstruí el pico.":"El sensor topó: tu velocidad real es mayor que esta.");
+  if(h.source==="camera"){ if(h.posture) p.push(...postureTips(h.posture)); p.push("Con la cámara el tiro sale recto: la cara y la ruta solo se miden con el sensor."); }
   if(h.sim) p.push("Golpe de prueba generado, no se guarda.");
   return p.join(" ");
 }
@@ -230,8 +242,9 @@ function renderBoard(h,flash){
   $("arc").textContent=fmtArc(h); $("arcSub").textContent=h.arcFin!=null?"final "+h.arcFin+"°":"";
   $("face").textContent=fmtFace(h); $("path").textContent=fmtPath(h);
   $("carry").textContent=fmtDist(dv.carry);
-  $("clubLab").textContent=CLUBS[h.club].name; const ck=calibKind(h.club); $("calibTag").textContent=ck?"· calibrado con "+ck:"";
-  $("quality").textContent=`Sensor a ${h.hz} lecturas por segundo · giro en el impacto ${h.omega??h.peak}°/s${h.sat?" (sensor saturado)":""}`+(h.aoa&&h.pathOk?` · ataque ${h.aoa>0?"+":""}${h.aoa}°`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<90?" A menos de 90 lecturas por segundo el pico puede quedar un poco bajo.":"");
+  $("clubLab").textContent=CLUBS[h.club].name; const ck=calibKind(h.club,srcOf(h)); $("calibTag").textContent=ck?"· calibrado con "+ck:"";
+  if(h.source==="camera") $("quality").textContent=`Cámara a ${h.hz} cuadros por segundo · manos a ${h.hand} m/s en el impacto · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<45?" Con 60 cuadros por segundo la medición es más precisa.":"");
+  else $("quality").textContent=`Sensor a ${h.hz} lecturas por segundo · giro en el impacto ${h.omega??h.peak}°/s${h.sat?" (sensor saturado)":""}`+(h.aoa&&h.pathOk?` · ataque ${h.aoa>0?"+":""}${h.aoa}°`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<90?" A menos de 90 lecturas por segundo el pico puede quedar un poco bajo.":"");
 }
 const setVerdict=html=>{ $("verdict").innerHTML=html; };
 function renderHist(){
@@ -285,11 +298,11 @@ function drawField(){
 function renderCalib(){
   const u=fmtSpeed(1).u; $("radarUnit").textContent=u;
   if(lastReal){ const v=toUnit(lastReal.msRaw); $("calibLast").textContent=`Último swing (${CLUBS[lastReal.club].name}), sin calibrar: ${v.toFixed(S.units==="ms"?1:0)} ${u}. ¿Cuánto marcó el radar?`; }
-  const mc=myCarry[club], nReal=history.filter(h=>h.club===club && !h.sim).length;
+  const mc=myCarry[club], nReal=realOf(club,S.input).length;
   $("myCarryIn").value = mc ? (S.dist==="yd"?Math.round(mc/0.9144):Math.round(mc)) : ""; $("myCarryUnit").textContent=S.dist==="yd"?"yd":"m"; $("myCarryClub").textContent=CLUBS[club].name;
   $("myCarryState").textContent = !mc ? `Escribe cuánto vuela normalmente tu ${CLUBS[club].name} (carry).` :
-     nReal<3 ? `Guardado. Haz ${3-nReal} swing${3-nReal>1?"s":""} real${3-nReal>1?"es":""} más con el ${CLUBS[club].name} para ajustar.` :
-     (calib[club]||[]).length ? "Este palo ya está calibrado con radar; el radar tiene prioridad." : `Ajustado: tu swing típico con el ${CLUBS[club].name} ahora vuela ${fmtDist(mc)}.`;
+     nReal<3 ? `Guardado. Haz ${3-nReal} swing${3-nReal>1?"s":""} real${3-nReal>1?"es":""} más con el ${CLUBS[club].name} usando ${S.input==="camera"?"la cámara":"el sensor"} para ajustar.` :
+     S.input==="sensor" && (calib[club]||[]).length ? "Este palo ya está calibrado con radar; el radar tiene prioridad." : `Ajustado para ${S.input==="camera"?"la cámara":"el sensor"}: tu swing típico con el ${CLUBS[club].name} ahora vuela ${fmtDist(mc)}.`;
   const p=calib[club]||[]; $("calibState").textContent=p.length?`${CLUBS[club].name}: ${p.length} swing${p.length>1?"s":""} comparados, factor ${factor(club).toFixed(2)}.`+(p.length<3?" Agrega algunos más para que sea confiable.":""):`${CLUBS[club].name}: sin calibrar.`;
 }
 function buildChips(){ const row=$("clubRow"); row.innerHTML=Object.keys(CLUBS).map(k=>`<button class="chip" data-club="${k}" aria-pressed="false">${CLUBS[k].name}</button>`).join("");
@@ -305,7 +318,8 @@ function renderAll(){ renderBoard(shown,false); renderHist(); drawTrace(); drawF
 function handleResult(res){
   lastPeakSeen = res.obs ?? res.peak ?? lastPeakSeen;
   if(res.error){ $("board").classList.add("stale"); setVerdict(res.error); beep(220,0.25); say("No reconocí el swing"); updateLive(); return; }
-  const {rawSamples,...h}=res;
+  const {rawSamples,poseFrames,marks,...h}=res;
+  if(poseFrames){ lastPose={poseFrames,marks}; $("replayBtn").hidden=false; } else if(!h.sim) { lastPose=null; $("replayBtn").hidden=true; }
   if(S.invert && !h.sim){ h.face=-h.face; h.path=-h.path; }
   if(!h.sim){ history.unshift(h); history=history.slice(0,300); store.set("sl2_hist",history);
     traces.unshift({id:h.id, club:h.club, hz:h.hz, s:rawSamples}); traces=traces.slice(0,25); store.set("sl2_traces",traces); lastReal=h; }
@@ -388,12 +402,47 @@ async function enable(){
   setTimeout(()=>{ if(!lastEvent) msg("No llegan datos del giroscopio. En iPhone revisa Ajustes › Safari › Movimiento y orientación. También puedes usar Golpe de prueba.",true); },1500);
 }
 async function keepAwake(){ try{ wake=await navigator.wakeLock?.request("screen"); }catch(_){} }
+// ================= Cámara =================
+let lastPose=null, camState="off";
+function camLayer(on){ const show=on && S.input==="camera" && SL.Cam.on && !SL.Cam.replaying();
+  $("camVideo").hidden=!show || !!window.__camMock; $("camCanvas").hidden=!show && !SL.Cam.replaying(); $("camMsg").hidden=!show || !$("camMsg").textContent;
+  if(show && mode==="data") $("view").hidden=false; }
+function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.className="camMsg "+(kind||""); m.hidden=!text || $("camVideo").hidden && !window.__camMock;
+  const st=$("status"); st.className="pill"+(kind==="ready"?" ready":kind==="bad"?" wait":" on"); if(text) st.textContent=kind==="ready"?"Listo":kind==="bad"?"Sin cuerpo":"Cámara"; }
+async function camStart(){
+  msg(""); audio(); say(" ");
+  if(window.top!==window){ msg("Dentro de Claude no se puede usar la cámara. Abre la app publicada o usa Golpe de prueba.",true); return; }
+  if(!SL.Cam.supported() && !window.__camMock){ msg("Este navegador no permite usar la cámara. Prueba con Safari o Chrome.",true); return; }
+  if(!has3D || mode==="data") $("view").hidden=false;
+  $("go").textContent="Iniciando cámara…"; $("go").className="go live";
+  $("camVideo").hidden=!!window.__camMock; $("camCanvas").hidden=false;
+  const ok=await SL.Cam.start({facing:S.camFacing, onStatus:camStatus, onReady:()=>{ if(S.guide) playRhythm(); else beep(880,0.08); },
+    onSwing:frames=>{ const res=SL.analyzePose(frames, club, {grip:S.camGrip, view:S.camView}); handleResult(res); }});
+  if(!ok){ camState="off"; setCamButton(); camLayer(false); return; }
+  camState="on"; keepAwake(); setCamButton(); camLayer(true);
+}
+function camStop(){ SL.Cam.stop(); camState="off"; setCamButton(); camLayer(false); if(mode==="data") $("view").hidden=true; }
+function setCamButton(){ const g=$("go"); g.className="go"; if(camState==="on"){ g.textContent="Cámara activa · tocar para apagar"; g.classList.add("live"); } else { g.textContent="Activar cámara"; $("status").className="pill"; $("status").textContent="Cámara apagada"; } }
+function setInput(i){
+  if(i===S.input) return;
+  if(S.input==="camera") camStop(); else if(phase!=="off") setPhase("idle");
+  S.input=i; saveSettings(); document.querySelectorAll("#inputSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.i===i)));
+  $("live").hidden=true; msg(""); $("camHelp").hidden=i!=="camera";
+  if(i==="camera") setCamButton(); else setPhase(phase==="off"?"off":"idle");
+  renderCalib();
+}
+document.querySelectorAll("#inputSeg button").forEach(b=>b.addEventListener("click",()=>setInput(b.dataset.i)));
+$("replayBtn").addEventListener("click",e=>{ e.stopPropagation(); if(!lastPose) return; World.skip(); $("camCanvas").hidden=false; $("camVideo").hidden=true; $("camMsg").hidden=true;
+  SL.Cam.replay(lastPose,0.3,()=>{ $("camCanvas").hidden=true; camLayer(true); }); });
 $("go").addEventListener("click",()=>{
+  if(S.input==="camera"){ if(camState==="on") camStop(); else camStart(); return; }
   if(phase==="off") return enable();
   if(phase==="idle"){ audio(); keepAwake(); readyBeeped=false; cooldownUntil=performance.now()+400; setPhase("armed"); msg(""); return; }
   setPhase("idle");
 });
-function updateLive(){ const el=$("live"); if(phase==="off"){ el.hidden=true; return; } el.hidden=false;
+function updateLive(){ const el=$("live");
+  if(S.input==="camera"){ if(camState!=="on"){ el.hidden=true; return; } el.hidden=false; el.textContent=`Cámara a ${SL.Cam.fps||"—"} cuadros por segundo`+(SL.Cam.speed!=null?` · manos: ${SL.Cam.speed.toFixed(1)} torsos/s (se dispara en 2,2)`:""); return; }
+  if(phase==="off"){ el.hidden=true; return; } el.hidden=false;
   el.textContent=`Giro ahora: ${Math.round(liveRate)}°/s · se dispara a ${TRIGGER}°/s`+(lastPeakSeen!=null?` · último pico: ${Math.round(lastPeakSeen)}°/s`:""); }
 setInterval(()=>{ if(hzTimes.length>10){ const span=(hzTimes[hzTimes.length-1]-hzTimes[0])/1000; if(span>0){ $("hz").hidden=false; $("hz").textContent=Math.round((hzTimes.length-1)/span)+" Hz"; } } updateLive(); },250);
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible" && phase==="armed") keepAwake(); });
@@ -407,7 +456,11 @@ function testShot(){
     for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,null,course.lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
     ms=(lo+hi)/2*(1+gauss()*0.05);
   } else ms=c.def*(0.92+Math.random()*0.16);
-  const peak=SL.omegaFor(club, ms/factor(club), S.hold)*1.005, full=c.def*0.85, frac=Math.min(1,ms/full);
+  const full=c.def*0.85, frac=Math.min(1,ms/full);
+  if(S.input==="camera"){ const ratio=4.6*(c.radius/1.55)*(S.camGrip==="club"?1:0.92), hand=ms/factor(club,"camera")/ratio*1.03;
+    const res=SL.analyzePose(SL.synthPose({fps:30, handSpeed:hand, hand:S.hand, top:85+frac*85+gauss()*6, finish:95+frac*85, back:640+frac*220+gauss()*40, down:290+gauss()*15, sway:Math.max(0,gauss()*6), head:gauss()*4, turn:60+frac*25}), club, {grip:S.camGrip, view:S.camView});
+    if(!res.error) res.sim=true; handleResult(res); return; }
+  const peak=SL.omegaFor(club, ms/factor(club), S.hold)*1.005;
   const res=SL.analyze(SL.synthKin({hz:100, peak, face:gauss()*2.5, path:gauss()*3.5, hand:S.hand, top:110+frac*140+gauss()*8, finish:120+frac*140, back:640+frac*200+gauss()*40, down:255+gauss()*15}), club, {mode:S.hold, hand:S.hand});
   if(!res.error) res.sim=true; handleResult(res);
 }
@@ -420,7 +473,7 @@ function setMode(m){
   mode=m; store.set("sl3_mode",mode);
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
-  $("view").hidden=m==="data"||!has3D; $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
+  $("view").hidden=(m==="data"||!has3D) && !(S.input==="camera" && camState==="on"); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
   $("card").hidden=true; setHudMsg(null); $("skip").hidden=true;
   if(has3D) World.setActive(m!=="data");
   if(m==="range") setupRange();
@@ -439,6 +492,7 @@ const bindSel=(id,key,after)=>{ $(id).value=S[key]; $(id).addEventListener("chan
 const bindChk=(id,key)=>{ $(id).checked=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.checked; saveSettings(); }); };
 function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear(); renderAll(); if(mode==="range") setupRange(); }
 bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand"); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
+bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView");
 bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
 document.querySelectorAll("#distSeg button").forEach(b=>b.addEventListener("click",()=>setDist(b.dataset.d)));
 $("myCarrySave").addEventListener("click",()=>{ const v=parseFloat($("myCarryIn").value);
@@ -508,6 +562,7 @@ const ex=SL.analyze(SL.synthKin({hz:100,peak:1700,face:1.5,path:-1}),club,{mode:
 if(!store.get("sl5_intro",false)) $("intro").hidden=false;
 if(window.top!==window){ $("expCsv").hidden=true; $("expJson").hidden=true; }
 setClub(club,true); setMode(mode);
+document.querySelectorAll("#inputSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.i===S.input))); $("camHelp").hidden=S.input!=="camera"; if(S.input==="camera") setCamButton();
 setVerdict("Swing de ejemplo. Activa los sensores para medir el tuyo, o toca Golpe de prueba para ver la simulación.");
 if("serviceWorker" in navigator && location.protocol==="https:" && window.top===window) navigator.serviceWorker.register("sw.js").catch(()=>{});
 window.__swingLab={SL, testShot, World};

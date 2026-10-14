@@ -60,6 +60,7 @@ h1 span{color:var(--accent)}
 .tag{background:rgba(8,24,18,.72);color:#eef4ef;border-radius:10px;padding:6px 10px;font-size:.82rem;line-height:1.3;max-width:62%}
 .tag b{font:700 1.15rem var(--display);letter-spacing:.04em;display:block}
 .tag.r{text-align:right}
+.tag:empty{display:none}
 .hudMsg{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);background:rgba(8,24,18,.78);color:#fff;border-radius:12px;padding:8px 14px;font:700 1.08rem/1.2 var(--display);letter-spacing:.05em;text-transform:uppercase;text-align:center;pointer-events:none;max-width:88%;white-space:normal}
 .card{position:absolute;left:10px;right:10px;bottom:10px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:rgba(8,24,18,.8);color:#eef4ef;border-radius:12px;padding:8px 10px;pointer-events:none}
 .card div{min-width:0}
@@ -96,6 +97,17 @@ h1 span{color:var(--accent)}
 .clubs::-webkit-scrollbar{display:none}
 .clubs .chip{flex:0 0 auto;min-width:76px;scroll-snap-align:center}
 #swingViz{height:190px}
+#camVideo,#camCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border:0;border-radius:0;background:#000}
+#camCanvas{background:transparent;pointer-events:none}
+#camCanvas.replay{background:#081812}
+.mirror{transform:scaleX(-1)}
+.camMsg{position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);text-align:center;font:700 clamp(1.4rem,6vw,2.2rem)/1.15 var(--display);letter-spacing:.03em;text-transform:uppercase;color:#fff;
+  text-shadow:0 2px 12px rgba(0,0,0,.7);pointer-events:none}
+.camMsg.ready{color:#7dff9a}.camMsg.bad{color:#ffd0c8;font-size:clamp(1.1rem,4.6vw,1.5rem)}
+.replayBtn{position:absolute;left:10px;bottom:84px;z-index:3;appearance:none;border:0;border-radius:99px;padding:7px 12px;background:rgba(8,24,18,.8);color:#fff;font:600 .8rem var(--body);cursor:pointer}
+.inputRow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.inputRow .lab2{font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.seg.big button{padding:8px 16px;font-size:.9rem}
 .intro{position:fixed;inset:0;z-index:20;background:rgba(6,20,16,.72);display:flex;align-items:center;justify-content:center;
   padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .intro .box{background:var(--surface);color:var(--ink);border-radius:16px;max-width:440px;width:100%;padding:20px;display:flex;flex-direction:column;gap:14px;max-height:100%;overflow:auto}
@@ -182,6 +194,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="hudMsg" id="hudMsg" hidden></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
+    <video id="camVideo" playsinline muted hidden></video>
+    <canvas id="camCanvas" hidden></canvas>
+    <div class="camMsg" id="camMsg" hidden></div>
+    <button class="replayBtn" id="replayBtn" hidden>▶ Repetición</button>
     <div class="card" id="card" hidden>
       <div><span>Carry</span><strong id="cCarry">—</strong></div>
       <div><span>Total</span><strong id="cTotal">—</strong></div>
@@ -206,6 +222,11 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="verdict" id="verdict"></div>
   </div>
 
+  <div class="inputRow">
+    <span class="lab2">Medir con</span>
+    <div class="seg big" id="inputSeg" role="group" aria-label="Forma de medir"><button data-i="sensor" aria-pressed="true">Sensor del teléfono</button><button data-i="camera" aria-pressed="false">Cámara</button></div>
+  </div>
+  <p class="note" id="camHelp" hidden>Apoya el teléfono a 2 o 3 metros, de frente a ti, con todo tu cuerpo en la imagen. Puedes hacer el swing con las manos vacías, con un palo o con algo que lo simule.</p>
   <div class="actions">
     <button class="go" id="go">Activar sensores</button>
     <button class="test" id="testShot">Golpe de prueba</button>
@@ -308,6 +329,12 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <label for="hold">Cómo sostienes el teléfono</label>
       <select id="hold"><option value="phone">Como si fuera el palo</option><option value="club">Sujeto a un palo real</option></select>
       <label for="invert">La bola se va al lado contrario del que debería</label><input type="checkbox" id="invert">
+      <label for="camFacing">Cámara a usar</label>
+      <select id="camFacing"><option value="user">Frontal (te ves en la pantalla)</option><option value="environment">Trasera (mejor imagen)</option></select>
+      <label for="camGrip">Con la cámara haces el swing</label>
+      <select id="camGrip"><option value="empty">Con las manos vacías</option><option value="club">Con un palo u objeto</option></select>
+      <label for="camView">La cámara te ve</label>
+      <select id="camView"><option value="front">De frente</option><option value="behind">Desde atrás</option></select>
       <label for="voice">Leer el resultado en voz alta</label><input type="checkbox" id="voice">
       <label for="cont">Medir swing tras swing sin tocar la pantalla</label><input type="checkbox" id="cont">
     </div>
@@ -323,6 +350,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
         <li>Haz el swing completo y quédate en el final un momento. La app sigue leyendo hasta que terminas.</li>
         <li>Debajo del botón ves el giro en vivo. Empieza a media velocidad, lejos de personas, muebles y ventanas.</li>
       </ol>
+      <p class="note"><b>Con la cámara:</b> apoya el teléfono a 2 o 3 metros, de frente a ti y con todo tu cuerpo en la imagen (de pies a cabeza). Activa la cámara, quédate quieto hasta que diga "Listo" y haz el swing con las manos vacías, con un palo o con algo que lo simule. La app sigue tus manos para medir el tempo, el arco y la velocidad, y te da consejos de postura. Con <b>▶ Repetición</b> ves tu swing en cámara lenta.</p>
       <div class="row"><button class="ghost" id="introShow">Ver la guía rápida</button></div>
       <p class="note">Para instalarla: en iPhone, botón Compartir y luego <b>Agregar a inicio</b>. En Android, menú de Chrome y luego <b>Instalar app</b>.</p>
       <p class="note">Cómo calcula: la app sigue la orientación del teléfono desde el address. Así sabe cuándo empezó la subida, hasta dónde llegó, el instante en que el palo vuelve a la bola (impacto), hacia dónde iba la cabeza (ruta), hacia dónde apuntaba la cara y hasta dónde terminó. La velocidad sale del giro en el impacto; en modo "como si fuera el palo" se compensa que un teléfono se gira más fácil que un palo de verdad. Con eso y valores típicos de cada palo (salida, lanzamiento y spin) se simula el vuelo con aerodinámica real: arrastre, sustentación por el spin, viento, bote y rodado. Muchos teléfonos topan cerca de 2000°/s; cuando pasa, la app reconstruye el pico (~) o te avisa que es un mínimo (≥). La cara del palo es experimental.</p>
@@ -334,6 +362,8 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 <div class="intro" id="intro" hidden role="dialog" aria-modal="true" aria-labelledby="introTitle">
   <div class="box">
     <h2 id="introTitle">Antes del primer swing</h2>
+    <p class="note">Hay dos formas de jugar y puedes cambiar cuando quieras con <b>Medir con</b>: el <b>sensor del teléfono</b> (lo tienes en las manos como si fuera el palo) o la <b>cámara</b> (el teléfono apoyado a 2 o 3 metros te mira mientras haces el swing).</p>
+    <p class="note"><b>Con el sensor:</b></p>
     <ol>
       <li><b>Agarra el teléfono como el grip</b>, con las dos manos y la pantalla mirando al objetivo. Una correa en la muñeca evita sustos.</li>
       <li><b>Quieto en address</b> hasta oír el tono. Desde ahí se miden el arco, el impacto y la cara.</li>
@@ -343,8 +373,9 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.5"></script>
-<script src="js/world3d.js?v=0.5"></script>
-<script src="js/app.js?v=0.5"></script>
+<script src="js/engine.js?v=0.6"></script>
+<script src="js/world3d.js?v=0.6"></script>
+<script src="js/camera.js?v=0.6"></script>
+<script src="js/app.js?v=0.6"></script>
 </body>
 </html>

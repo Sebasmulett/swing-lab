@@ -1,6 +1,6 @@
 // Swing Lab: funciona sin conexión en el campo de práctica
-const CACHE = "swing-lab-v0.5";
-const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.5", "./js/world3d.js?v=0.5", "./js/app.js?v=0.5", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
+const CACHE = "swing-lab-v0.6";
+const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.6", "./js/world3d.js?v=0.6", "./js/camera.js?v=0.6", "./js/app.js?v=0.6", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -24,7 +24,7 @@ self.addEventListener("fetch", e => {
         return res;
       }).catch(() => caches.match(e.request).then(r => r || caches.match("./index.html")))
     );
-  } else if (/fonts\.(googleapis|gstatic)\.com$|cdnjs\.cloudflare\.com$/.test(url.hostname)) {
+  } else if (/fonts\.(googleapis|gstatic)\.com$|cdnjs\.cloudflare\.com$|cdn\.jsdelivr\.net$|storage\.googleapis\.com$/.test(url.hostname)) {
     e.respondWith(
       caches.match(e.request).then(r => r || fetch(e.request).then(res => {
         const copy = res.clone();
