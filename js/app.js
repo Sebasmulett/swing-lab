@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.6";
+const VERSION="0.7";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -79,23 +79,57 @@ function say(txt){ if(!S.voice || !("speechSynthesis" in window)) return;
     if(v) u.voice=v; u.lang=v?v.lang:"es-ES"; u.rate=1.05; speechSynthesis.speak(u); }catch(_){} }
 
 // ================= Mundo: helpers =================
-const toWorld=(pts,ox,oz,yaw)=>{ const f=[Math.sin(yaw),Math.cos(yaw)], r=[Math.cos(yaw),-Math.sin(yaw)];
+// En la vista 3D (three.js), mirando hacia el objetivo, la derecha de la pantalla es (-cos yaw, sin yaw)
+const rightOf=yaw=>[-Math.cos(yaw),Math.sin(yaw)];
+const toWorld=(pts,ox,oz,yaw)=>{ const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw);
   return pts.map(p=>({t:p.t, x:ox+r[0]*p.x+f[0]*p.z, y:p.y, z:oz+r[1]*p.x+f[1]*p.z})); };
 function setHudMsg(t){ const m=$("hudMsg"); if(!t){ m.hidden=true; return; } m.textContent=t; m.hidden=false; }
-function showCard(sim){ $("cCarry").textContent=fmtDist(sim.carry); $("cTotal").textContent=fmtDist(Math.hypot(sim.x,sim.z));
-  $("cLat").textContent=fmtLat(sim.x); $("cApex").textContent=fmtDist(sim.apex); $("cBall").textContent=fmtSpeed(sim.ball).v+" "+fmtSpeed(1).u; $("card").hidden=false; }
+function showCard(sim,toTarget){ $("cCarry").textContent=fmtDist(sim.carry); $("cTotal").textContent=fmtDist(Math.hypot(sim.x,sim.z));
+  $("cLat").textContent=fmtLat(sim.x); $("cApex").textContent=fmtDist(sim.apex); $("cBall").textContent=fmtSpeed(sim.ball).v+" "+fmtSpeed(1).u;
+  $("cTgt").textContent=toTarget!=null?fmtDist(toTarget):"—"; $("card").hidden=false; }
+// ================= Apuntar (estilo TrackMan) =================
+// El objetivo es un punto del suelo. El tiro sale hacia él y el desvío se mide respecto a esa línea.
+let rangeAim=store.get("sl7_rangeAim",{x:6,z:150}), aimMode=false, rangeProx=store.get("sl7_rangeProx",[]);
+const yawTo=(o,p)=>Math.atan2(p.x-o.x,p.z-o.z);
+function aimOrigin(){ return mode==="course"&&course ? course.ball : {x:0,z:0}; }
+function aimPoint(){ if(mode==="course"&&course){ const h=HOLES[course.hole]; return course.aim||{x:h.pinX,z:h.L}; } return rangeAim; }
+function aimYaw(){ return yawTo(aimOrigin(),aimPoint()); }
+function aimDist(){ const o=aimOrigin(), p=aimPoint(); return Math.hypot(p.x-o.x,p.z-o.z); }
+function setAim(p,quiet){
+  const o=aimOrigin(), d=Math.hypot(p.x-o.x,p.z-o.z); if(d<5) return;
+  if(mode==="course"&&course){ const h=HOLES[course.hole]; course.aim = Math.hypot(p.x-h.pinX,p.z-h.L)<1 ? null : {x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; saveCourse(); suggestClub(); }
+  else { rangeAim={x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; store.set("sl7_rangeAim",rangeAim); }
+  if(has3D){ World.setAim(aimPoint()); if(!aimMode) World.address(o.x,o.z,aimYaw(),false); }
+  renderAim(); if(!quiet) beep(1200,0.03);
+}
+function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="";
+  if(mode==="course"&&course){ side=course.aim?"":" · al hoyo"; }
+  $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`; $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
+  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || (mode==="course"&&course&&(course.holed||course.done)) || (S.input==="camera" && SL.Cam.on && !$("camVideo").hidden); void o; void p; }
+function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
+  setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
+function toggleAimView(on){ aimMode=on; const o=aimOrigin(), p=aimPoint();
+  if(on){ const span=mode==="course"&&course ? Math.max(80,Math.hypot(HOLES[course.hole].pinX-o.x,HOLES[course.hole].L-o.z)*1.15) : 330;
+    const yaw=aimYaw(), c={x:o.x+Math.sin(yaw)*span*0.5, z:o.z+Math.cos(yaw)*span*0.5}; World.aimView(true,{x:c.x,z:c.z,span});
+    setHudMsg("Toca donde quieres que caiga la bola"); $("card").hidden=true; }
+  else { World.aimView(false); World.address(o.x,o.z,aimYaw(),false); setHudMsg(null); }
+  renderAim(); }
 let shotSeq=0;
 
 // ================= Range =================
-function setupRange(){ if(!has3D) return; World.setRange({um:S.dist==="yd"?0.9144:1}); World.setMarks(rangeMarks); World.address(0,0,0,true); }
+function setupRange(){ if(!has3D) return; World.setRange({um:S.dist==="yd"?0.9144:1}); World.setMarks(rangeMarks); World.setAim(rangeAim); World.address(0,0,yawTo({x:0,z:0},rangeAim),true); renderAim(); }
 function rangeShot(h){
   const dv=derive(h), sim=SL.simulateLocal(launch(h.club,dv.ms,h,"tee"),[0,0],null);
-  const pts=toWorld(sim.pts,0,0,0), seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false;
+  if(aimMode) toggleAimView(false);
+  const yaw=yawTo({x:0,z:0},rangeAim), pts=toWorld(sim.pts,0,0,yaw), seq=++shotSeq, fin=pts[pts.length-1], toT=Math.hypot(fin.x-rangeAim.x,fin.z-rangeAim.z);
+  sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
   camLayer(false);
   World.playShot({pts, landT:sim.landT, onLand:sfx.land, onEnd:()=>{
-    $("skip").hidden=true; rangeMarks.push({x:+sim.x.toFixed(1),z:+sim.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
-    World.setMarks(rangeMarks); showCard(sim); renderHud(); const sh=shapeName(h); if(sh) setHudMsg(sh);
-    setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range"){ World.address(0,0,0,true); camLayer(true); } },3800); }});
+    $("skip").hidden=true; rangeMarks.push({x:+fin.x.toFixed(1),z:+fin.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
+    if(!h.sim){ rangeProx.push(+toT.toFixed(1)); rangeProx=rangeProx.slice(-30); store.set("sl7_rangeProx",rangeProx); }
+    World.setMarks(rangeMarks); showCard(sim,toT); renderHud(); const sh=shapeName(h); setHudMsg(`A ${fmtDist(toT)} del objetivo`+(sh?` · ${sh}`:""));
+    say(`A ${sayDist(toT)} del objetivo.`);
+    setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range"){ World.address(0,0,yawTo({x:0,z:0},rangeAim),true); camLayer(true); setHudMsg(null); $("card").hidden=true; renderAim(); } },3800); }});
 }
 
 // ================= Campo =================
@@ -109,7 +143,8 @@ const distToPin=()=>{ const h=HOLES[course.hole]; return Math.hypot(h.pinX-cours
 let builtHole=-1;
 function setupHole(announce){
   if(has3D){ if(builtHole!==course.hole || announce){ World.setHole(HOLES[course.hole]); builtHole=course.hole; }
-    World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.address(course.ball.x,course.ball.z,holeYaw(),true); }
+    World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),true); }
+  renderAim();
   suggestClub(); renderHud(); drawMini(); camLayer(true);
   if(announce){ const h=HOLES[course.hole], w=course.wind[course.hole];
     say(`Hoyo ${course.hole+1}, par ${h.par}, ${sayDist(h.L)}.`+(w.s>0.3?` Viento de ${Math.round(w.s)} metros por segundo.`:" Sin viento.")); }
@@ -118,7 +153,7 @@ function expectedTotal(c,lie){ const mine=history.filter(h=>h.club===c && !h.sim
   const s=SL.simulateLocal(launch(c,ms,null,lie),[0,0],null); return Math.hypot(s.x,s.z); }
 function suggestClub(){
   if(mode!=="course" || !course || course.holed){ suggested=null; renderChips(); return; }
-  const R=distToPin(), allowed=SL.CLUB_ORDER.filter(c=>c==="driver"?course.lie==="tee":c==="wood3"?(course.lie==="tee"||course.lie==="fairway"):(course.lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
+  const R=aimDist(), allowed=SL.CLUB_ORDER.filter(c=>c==="driver"?course.lie==="tee":c==="wood3"?(course.lie==="tee"||course.lie==="fairway"):(course.lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
   const opts=allowed.map(c=>({c,t:expectedTotal(c,course.lie)}));
   suggested=(opts.find(o=>o.t>=R*0.92)||opts[opts.length-1]).c; if(suggested!==club) setClub(suggested,true); renderChips();
 }
@@ -135,17 +170,18 @@ function finishHole(text,voice){
 function courseShot(h){
   if(course.done){ say("La ronda terminó. Empieza una nueva."); return; }
   if(course.holed) nextHole();
-  const hole=HOLES[course.hole], yaw=holeYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole];
-  const f=[Math.sin(yaw),Math.cos(yaw)], r=[Math.cos(yaw),-Math.sin(yaw)], windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
+  if(aimMode) toggleAimView(false);
+  const hole=HOLES[course.hole], yaw=aimYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole], tgt=aimPoint();
+  const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw), windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
   const dv=derive(h), o=launch(h.club,dv.ms,h,course.lie);
   const sim=SL.simulateLocal(o, windLocal, (lx,lz)=>SL.lieAt(hole, ox+r[0]*lx+f[0]*lz, oz+r[1]*lx+f[1]*lz));
   const pts=toWorld(sim.pts,ox,oz,yaw), fx=ox+r[0]*sim.x+f[0]*sim.z, fz=oz+r[1]*sim.x+f[1]*sim.z;
   const endLie = sim.landG==="water"||sim.landG==="ob" ? sim.landG : SL.lieAt(hole,fx,fz);
   const line=pts.filter(p=>p.t<=sim.landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
-  const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false;
+  const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
   camLayer(false);
   World.playShot({pts, landT:sim.landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
-    $("skip").hidden=true; showCard(sim);
+    $("skip").hidden=true; showCard(sim, Math.hypot(fx-tgt.x,fz-tgt.z));
     course.lines.push(line); World.setLines(course.lines);
     if(endLie==="water" || endLie==="ob"){
       course.strokes+=2; const text=endLie==="water"?"¡Agua! +1 de penalidad":"Fuera de límites · +1";
@@ -153,7 +189,8 @@ function courseShot(h){
       saveCourse(); renderHud(); renderScore(); drawMini(); suggestClub();
       setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },2800); return;
     }
-    course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; drawMini();
+    course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; course.aim=null; drawMini();
+    if(Math.hypot(tgt.x-hole.pinX,tgt.z-hole.L)>1) setTimeout(()=>{ if(seq===shotSeq) say(`A ${sayDist(Math.hypot(fx-tgt.x,fz-tgt.z))} del objetivo.`); },2200);
     const d=distToPin();
     if(d<0.3){ const diff=course.strokes-hole.par, name=course.strokes===1?"¡Hoyo en uno!":(RESULT[diff]||(diff>0?`+${diff}`:`${diff}`));
       sfx.cup(); finishHole(`¡Embocada! ${name}`, `¡Embocada! ${name}.`); return; }
@@ -172,18 +209,20 @@ function courseShot(h){
     setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },3200);
   }});
 }
-function nextHole(){ if(!course || course.done) return; if(course.hole<HOLES.length-1){ course.hole++; course.ball={x:0,z:0}; course.lie="tee"; course.strokes=0; course.lines=[]; course.holed=false;
+function nextHole(){ if(!course || course.done) return; if(course.hole<HOLES.length-1){ course.hole++; course.ball={x:0,z:0}; course.lie="tee"; course.strokes=0; course.lines=[]; course.holed=false; course.aim=null;
   saveCourse(); setHudMsg(null); $("card").hidden=true; setupHole(true); renderScore(); } }
 function renderHud(){
   const R=$("hudR");
-  if(mode==="range"){ $("hudL").innerHTML=`<b>Driving range</b>${CLUBS[club].name}`; R.innerHTML=`<b>${rangeMarks.length}</b>tiro${rangeMarks.length===1?"":"s"} en pantalla`; R.hidden=!rangeMarks.length; return; }
+  if(mode==="range"){ $("hudL").innerHTML=`<b>Driving range</b>${CLUBS[club].name}`;
+    const pr=rangeProx.slice(-10); R.innerHTML=pr.length?`<b>${fmtDist(pr.reduce((a,b)=>a+b,0)/pr.length)}</b>proximidad media · ${pr.length} tiro${pr.length===1?"":"s"}`:`<b>${rangeMarks.length}</b>tiros en pantalla`;
+    R.hidden=!pr.length && !rangeMarks.length; renderAim(); return; }
   if(mode!=="course" || !course) return;
   const h=HOLES[course.hole], w=course.wind[course.hole], d=distToPin();
   $("hudL").innerHTML=`<b>Hoyo ${course.hole+1} · Par ${h.par}</b>${h.name} · ${course.holed?"terminado":"faltan "+fmtDist(d)}`;
   const tot=course.scores.reduce((a,b,i)=>a+(b||0)-(b?HOLES[i].par:0),0); R.hidden=false;
   R.innerHTML=`<b>${course.holed?course.strokes+" golpes":"Golpe "+(course.strokes+1)}</b>${w.s>0.3?"Viento "+w.s.toFixed(0)+" m/s "+windArrow(w):"Sin viento"}<br>Ronda: ${tot===0?"par":tot>0?"+"+tot:tot}`;
 }
-function windArrow(w){ if(!course) return ""; const rel=Math.atan2(w.x,w.z)-holeYaw(), a=((rel/DEG)%360+360)%360;
+function windArrow(w){ if(!course) return ""; const rel=aimYaw()-Math.atan2(w.x,w.z), a=((rel/DEG)%360+360)%360;
   return ["↑","↗","→","↘","↓","↙","←","↖"][Math.round(a/45)%8]; }
 function renderScore(){
   if(!course) return; const tbl=$("scoreTbl"), par=HOLES.reduce((a,b)=>a+b.par,0);
@@ -193,12 +232,12 @@ function renderScore(){
   tbl.innerHTML=`<thead><tr><th>Hoyo</th>${HOLES.map((h,i)=>`<th>${i+1}</th>`).join("")}<th>Total</th></tr></thead><tbody><tr><td>Par</td>${HOLES.map(h=>`<td>${h.par}</td>`).join("")}<td>${par}</td></tr><tr><td>Golpes</td>${cells}<td><b>${tot||"—"}</b></td></tr></tbody>`;
   $("nextHole").hidden=!(course.holed && !course.done);
   $("courseNote").textContent = course.done ? `Ronda terminada: ${tot} golpes (${tot-par===0?"par del campo":tot-par>0?"+"+(tot-par):tot-par}).`+(records.course?` Tu récord: ${records.course}.`:"")
-    : "Tres hoyos: par 4 con bunkers, par 3 con agua delante del green y par 5 con un lago a la derecha. Los putts se juegan solos según la distancia. El viento cambia en cada hoyo."+(records.course?` Tu récord: ${records.course} golpes.`:"");
+    : "Tres hoyos: par 4 con bunkers, par 3 con agua delante del green y par 5 con un lago a la izquierda. Los putts se juegan solos según la distancia. El viento cambia en cada hoyo."+(records.course?` Tu récord: ${records.course} golpes.`:"");
 }
 function drawMini(){
   const cv=$("mini"); if(cv.hidden || !course) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
   cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0);
-  const h=HOLES[course.hole], sc=(H-10)/(h.L+40), X=x=>W/2+x*sc, Y=z=>H-6-(z+5)*sc;
+  const h=HOLES[course.hole], sc=(H-10)/(h.L+40), X=x=>W/2-x*sc, Y=z=>H-6-(z+5)*sc;   // igual que se ve desde el tee en 3D
   c.fillStyle="#5a893a"; c.fillRect(0,0,W,H);
   c.fillStyle="#86be5a"; c.beginPath(); let first=true;
   for(let z=h.fwStart; z<=h.L; z+=6){ const x=SL.cxAt(h,z)-SL.hwAt(h,z); first?(c.moveTo(X(x),Y(z)),first=false):c.lineTo(X(x),Y(z)); }
@@ -312,7 +351,7 @@ function renderChips(){ document.querySelectorAll(".chip").forEach(x=>{ x.setAtt
   if(mode==="course" && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } });
   const cur=document.querySelector('.chip[aria-pressed="true"]'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"}); }catch(_){} 
   document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
-function renderAll(){ renderBoard(shown,false); renderHist(); drawTrace(); drawField(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
+function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawTrace(); drawField(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
 
 // ================= Resultado de un swing =================
 function handleResult(res){
@@ -406,7 +445,7 @@ async function keepAwake(){ try{ wake=await navigator.wakeLock?.request("screen"
 let lastPose=null, camState="off";
 function camLayer(on){ const show=on && S.input==="camera" && SL.Cam.on && !SL.Cam.replaying();
   $("camVideo").hidden=!show || !!window.__camMock; $("camCanvas").hidden=!show && !SL.Cam.replaying(); $("camMsg").hidden=!show || !$("camMsg").textContent;
-  if(show && mode==="data") $("view").hidden=false; }
+  if(show && mode==="data") $("view").hidden=false; renderAim(); }
 function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.className="camMsg "+(kind||""); m.hidden=!text || $("camVideo").hidden && !window.__camMock;
   const st=$("status"); st.className="pill"+(kind==="ready"?" ready":kind==="bad"?" wait":" on"); if(text) st.textContent=kind==="ready"?"Listo":kind==="bad"?"Sin cuerpo":"Cámara"; }
 async function camStart(){
@@ -451,9 +490,10 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 const gauss=()=>{ let u=0; while(!u)u=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random()); };
 function testShot(){
   audio(); const c=CLUBS[club]; let ms;
-  if(mode==="course" && course && !course.holed && !course.done){
-    const target=distToPin(); let lo=c.def*0.15, hi=c.def*1.08;
-    for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,null,course.lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
+  if(mode!=="data" && !(mode==="course" && (!course || course.holed || course.done))){
+    // apunta a la distancia del objetivo (si el palo llega) con error humano
+    const target=aimDist(), lie=mode==="course"?course.lie:"tee"; let lo=c.def*0.15, hi=c.def*1.08;
+    for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,null,lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
     ms=(lo+hi)/2*(1+gauss()*0.05);
   } else ms=c.def*(0.92+Math.random()*0.16);
   const full=c.def*0.85, frac=Math.min(1,ms/full);
@@ -465,7 +505,17 @@ function testShot(){
   if(!res.error) res.sim=true; handleResult(res);
 }
 $("testShot").addEventListener("click",testShot);
-$("view").addEventListener("click",()=>World.skip());
+$("view").addEventListener("click",e=>{
+  if(World.busy()){ World.skip(); return; }
+  if(!has3D || mode==="data" || SL.Cam.replaying() || (S.input==="camera" && SL.Cam.on && !$("camVideo").hidden && !window.__camMock)) return;
+  if(mode==="course" && course && (course.holed||course.done)) return;
+  const p=World.pick(e.clientX,e.clientY); if(!p) return;
+  const o=aimOrigin(); if((p.x-o.x)*Math.sin(aimYaw())+(p.z-o.z)*Math.cos(aimYaw())<3 && !aimMode) return;   // no apuntar hacia atrás
+  setAim(p); });
+$("aimGo").addEventListener("click",e=>{ e.stopPropagation(); toggleAimView(!aimMode); });
+$("aimL").addEventListener("click",e=>{ e.stopPropagation(); nudgeAim(1.5); });
+$("aimR").addEventListener("click",e=>{ e.stopPropagation(); nudgeAim(-1.5); });
+$("aimPin").addEventListener("click",e=>{ e.stopPropagation(); if(course){ course.aim=null; saveCourse(); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),false); suggestClub(); renderAim(); } });
 
 // ================= Modos y controles =================
 function setClub(c,silent){ club=c; store.set("sl2_club",club); $("clubLab").textContent=CLUBS[club].name; if(!silent) renderAll(); else renderChips(); }
@@ -474,7 +524,7 @@ function setMode(m){
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
   $("view").hidden=(m==="data"||!has3D) && !(S.input==="camera" && camState==="on"); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
-  $("card").hidden=true; setHudMsg(null); $("skip").hidden=true;
+  $("card").hidden=true; setHudMsg(null); $("skip").hidden=true; if(aimMode){ aimMode=false; }
   if(has3D) World.setActive(m!=="data");
   if(m==="range") setupRange();
   else if(m==="course"){ if(!course) newRound(); else { builtHole=-1; setupHole(false); } }

@@ -240,8 +240,19 @@ W3.address=function(x,z,yaw,immediate){
   const pos=new T.Vector3(x-S.f.x*5.2, 1.7, z-S.f.z*5.2), look=new T.Vector3(x+S.f.x*90, 1.5, z+S.f.z*90);
   S.cam.tPos=pos; S.cam.tLook=look; S.cam.rate=1.6; S.cam.lookRate=2;
   if(immediate){ S.cam.pos.copy(pos); S.cam.look.copy(look); }
-  paintDetail(x,z);
+  if(!S.detailAt || Math.hypot(S.detailAt.x-x,S.detailAt.z-z)>0.5 || S.detailDef!==def){ paintDetail(x,z); S.detailAt={x,z}; S.detailDef=def; }
+  S.aimView=false;
 };
+// ---------------- apuntar (estilo TrackMan) ----------------
+W3.setAim=function(p){ S.aim=p?{x:p.x,z:p.z}:null; if(aimRing) aimRing.visible=!!p; };
+W3.pick=function(cx,cy){ if(!W3.ok) return null; const r=canvas.getBoundingClientRect();
+  const ndc=new T.Vector2(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1), rc=new T.Raycaster(); rc.setFromCamera(ndc,camera);
+  const hit=new T.Vector3(); if(!rc.ray.intersectPlane(new T.Plane(new T.Vector3(0,1,0),0),hit)) return null;
+  if(hit.distanceTo(camera.position)>1500) return null; return {x:hit.x, z:hit.z}; };
+// vista aérea para elegir el objetivo; o: {x,z,span} centro y tamaño del área
+W3.aimView=function(on,o){ if(!W3.ok) return; S.aimView=!!on;
+  if(on){ const h=Math.max(60,o.span*1.05), f=S.f; S.cam.tPos=new T.Vector3(o.x-f.x*h*0.18, h, o.z-f.z*h*0.18); S.cam.tLook=new T.Vector3(o.x+f.x*h*0.04,0,o.z+f.z*h*0.04); S.cam.rate=3; S.cam.lookRate=3; }
+  else { const a=S.address; W3.address(a.x,a.z,a.yaw,false); } };
 function interp(a,tt){ let i=a.i||0; while(i<a.pts.length-2 && a.pts[i+1].t<tt) i++; a.i=i; const p=a.pts[i], q=a.pts[i+1]||p, k=Math.max(0,Math.min(1,(tt-p.t)/((q.t-p.t)||1)));
   return [p.x+(q.x-p.x)*k, p.y+(q.y-p.y)*k, p.z+(q.z-p.z)*k]; }
 W3.playShot=function(o){ // o: {pts:[{t,x,y,z}] mundo, landT, onLand, onEnd}
@@ -264,6 +275,7 @@ W3.playPutts=function(o){ // o: {from:{x,z}, pin:{x,z}, n, onPutt, onHole, onEnd
 };
 W3.skip=function(){ if(S.anim) S.anim.skip=true; if(S.putt) S.putt.skip=true; };
 W3.busy=()=>!!(S.anim||S.putt);
+let aimRing=null, aimDisc=null, aimLine=null;
 
 
 function update(dt){
@@ -306,6 +318,13 @@ function update(dt){
   // trazador
   trOuter.set(S.trail); trCore.set(S.trail);
   S.linesData.forEach((l,i)=>linePool[i] && linePool[i].set(l));
+  // objetivo y línea de mira (solo en address)
+  const showAim=!!S.aim && !S.anim && !S.putt;
+  aimRing.visible=showAim; aimDisc.visible=showAim;
+  if(showAim){ const a=S.aim, dd=camera.position.distanceTo(new T.Vector3(a.x,0,a.z)), sc=Math.max(1,dd/32)*(1+0.06*Math.sin(now*4));
+    aimRing.position.set(a.x,0.08,a.z); aimRing.scale.setScalar(sc); aimDisc.position.set(a.x,0.07,a.z); aimDisc.scale.setScalar(sc);
+    const b=S.address, n=40, pts=[]; for(let i=0;i<=n;i++){ const k=i/n; pts.push([b.x+(a.x-b.x)*k, 0.09, b.z+(a.z-b.z)*k]); } aimLine.set(pts); }
+  else aimLine.g.setDrawRange(0,0);
   // banderas al viento
   const ws=Math.hypot(S.wind.x,S.wind.z), wy=Math.atan2(-S.wind.z,S.wind.x);
   for(const fl of flags){ const u=fl.userData, pos=u.cloth.geometry.attributes.position, b=u.base;
@@ -317,7 +336,7 @@ function update(dt){
 
 function loop(){ requestAnimationFrame(loop); const dt=Math.min(0.05,clock.getDelta()); if(!W3.active || document.hidden) return; update(dt); R.render(scene,camera); }
 W3.resize=function(){ if(!W3.ok) return; const w=canvas.clientWidth||1, h=canvas.clientHeight||1; R.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
-  [trOuter,trCore,...linePool].forEach(l=>l.res(w,h)); };
+  [trOuter,trCore,aimLine,...linePool].forEach(l=>l&&l.res(w,h)); };
 W3.setActive=function(a){ W3.active=a; if(a) W3.resize(); };
 
 W3.init=function(cv){
@@ -356,6 +375,10 @@ W3.init=function(cv){
   ball=new T.Mesh(new T.SphereGeometry(BALL_R,18,12),new T.MeshPhongMaterial({color:0xffffff, emissive:0x333333, shininess:70})); scene.add(ball);
   shadow=new T.Mesh(new T.CircleGeometry(0.03,16).rotateX(-Math.PI/2),new T.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.4, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-6, polygonOffsetUnits:-12})); scene.add(shadow);
   trOuter=new SSLine(600,0x101010,6.5,0.28); trCore=new SSLine(600,0xffcf33,3,1); scene.add(trOuter.mesh,trCore.mesh);
+  aimLine=new SSLine(48,0xffffff,2.2,0.75); scene.add(aimLine.mesh);
+  aimRing=new T.Mesh(new T.RingGeometry(1.25,1.6,48).rotateX(-Math.PI/2), new T.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.95, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-8, polygonOffsetUnits:-16}));
+  aimDisc=new T.Mesh(new T.CircleGeometry(1.25,40).rotateX(-Math.PI/2), new T.MeshBasicMaterial({color:0xffcf33, transparent:true, opacity:0.35, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-7, polygonOffsetUnits:-14}));
+  aimRing.visible=aimDisc.visible=false; scene.add(aimRing,aimDisc);
   clock=new T.Clock();
   S.cam.pos=new T.Vector3(0,1.7,-5.2); S.cam.look=new T.Vector3(0,1.5,90);
   W3.ok=true; W3.resize(); loop(); return true;
