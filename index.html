@@ -86,6 +86,22 @@ h1 span{color:var(--accent)}
 .board.compact .stats strong{font-size:1.15rem}
 .board.compact .verdict{flex-basis:100%;font-size:.88rem}
 .board.compact .carryStat{display:none}
+.stats small{display:block;font-size:.72rem;color:var(--deep-muted);font-variant-numeric:tabular-nums;min-height:1em}
+.board.compact .stats{grid-template-columns:repeat(4,1fr)}
+@media (max-width:400px){.board.compact .stats{grid-template-columns:repeat(2,1fr)}}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;overflow:hidden;background:var(--surface)}
+.seg button{appearance:none;border:0;background:none;padding:4px 11px;font:700 .8rem var(--body);color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.row.clubs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-top:9px;margin-top:-9px;scroll-snap-type:x proximity}
+.clubs::-webkit-scrollbar{display:none}
+.clubs .chip{flex:0 0 auto;min-width:76px;scroll-snap-align:center}
+#swingViz{height:190px}
+.intro{position:fixed;inset:0;z-index:20;background:rgba(6,20,16,.72);display:flex;align-items:center;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.intro .box{background:var(--surface);color:var(--ink);border-radius:16px;max-width:440px;width:100%;padding:20px;display:flex;flex-direction:column;gap:14px;max-height:100%;overflow:auto}
+.intro h2{font-size:1.5rem}
+.intro ol{gap:10px;font-size:.95rem}
+.intro b{color:var(--ink)}
 @media (max-width:400px){.stats{grid-template-columns:repeat(2,1fr)}.speed b{font-size:4.3rem}.card{grid-template-columns:repeat(3,1fr)}.card .opt{display:none}}
 .board.stale .speed b,.board.stale .stats strong{opacity:.4}
 .flash{animation:flash .6s ease-out}
@@ -148,7 +164,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 <div class="wrap">
   <header>
     <h1>Swing <span>Lab</span></h1>
-    <div class="pills"><span class="pill" id="hz" hidden></span><span class="pill" id="status">Sensores apagados</span></div>
+    <div class="pills"><div class="seg" id="distSeg" role="group" aria-label="Unidad de distancia"><button data-d="m" aria-pressed="true">m</button><button data-d="yd" aria-pressed="false">yd</button></div><span class="pill" id="hz" hidden></span><span class="pill" id="status">Sensores apagados</span></div>
   </header>
 
   <nav class="modes" aria-label="Modo">
@@ -181,10 +197,11 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <div class="speed"><i id="prefix"></i><b id="speed">—</b><small id="unitLab">mph</small></div>
     </div>
     <div class="stats">
-      <div><span class="lab">Tempo</span><strong id="tempo">—</strong></div>
-      <div><span class="lab">Subida/bajada</span><strong id="times">—</strong></div>
-      <div class="carryStat"><span class="lab">Carry</span><strong id="carry">—</strong></div>
+      <div><span class="lab">Tempo</span><strong id="tempo">—</strong><small id="tempoSub"></small></div>
+      <div><span class="lab">Arco</span><strong id="arc">—</strong><small id="arcSub"></small></div>
       <div><span class="lab">Cara</span><strong id="face">—</strong></div>
+      <div><span class="lab">Ruta</span><strong id="path">—</strong></div>
+      <div class="carryStat"><span class="lab">Carry</span><strong id="carry">—</strong></div>
     </div>
     <div class="verdict" id="verdict"></div>
   </div>
@@ -196,10 +213,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   <p class="note" id="msg"></p>
   <p class="note" id="live" hidden></p>
 
-  <div class="row" role="group" aria-label="Palo">
-    <button class="chip" data-club="driver" aria-pressed="true">Driver</button>
-    <button class="chip" data-club="iron7" aria-pressed="false">Hierro 7</button>
-    <button class="chip" data-club="wedge" aria-pressed="false">Wedge</button>
+  <div class="row clubs" id="clubRow" role="group" aria-label="Palo">
   </div>
 
   <section data-for="course" hidden>
@@ -227,6 +241,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <div class="legend"><span><i style="background:var(--accent)"></i>Último tiro</span><span><i style="background:var(--muted)"></i>Tiros anteriores de este palo</span></div>
     </div>
     <div class="panel" data-panel="curve" hidden>
+      <canvas class="plot" id="swingViz" aria-label="Arco del swing y dirección de cara y ruta"></canvas>
       <canvas class="plot" id="plot" aria-label="Curva de giro del último swing"></canvas>
       <div class="legend"><span><i style="background:var(--muted)"></i>Subida</span><span><i style="background:var(--accent)"></i>Bajada</span><span>▲ inicio · ● arriba · ★ impacto</span></div>
       <p class="note" id="quality"></p>
@@ -240,7 +255,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       </div>
       <p class="note" id="kNote">Datos del palo seleccionado.</p>
       <div class="tablebox"><table>
-        <thead><tr><th>#</th><th>Palo</th><th>Velocidad</th><th>Tempo</th><th>Carry</th><th>Total</th><th>Cara</th></tr></thead>
+        <thead><tr><th>#</th><th>Palo</th><th>Velocidad</th><th>Tempo</th><th>Carry</th><th>Total</th><th>Forma</th></tr></thead>
         <tbody id="hist"></tbody>
       </table></div>
       <div class="row">
@@ -266,8 +281,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   </details>
 
   <details>
-    <summary>Calibrar con radar</summary>
+    <summary>Calibrar</summary>
     <div class="dbody">
+      <h2>Con tus distancias</h2>
+      <p class="note">Como el teléfono no pesa como un palo, la forma más fácil de afinar es decirle a la app cuánto vuela tu golpe normal. Después de 3 swings reales con ese palo, tus swings típicos caerán a esa distancia.</p>
+      <div class="row"><label for="myCarryIn">Carry de tu <span id="myCarryClub">Driver</span></label><input type="number" id="myCarryIn" inputmode="decimal" min="5" max="400"><span id="myCarryUnit">m</span><button class="ghost primary" id="myCarrySave">Guardar</button><button class="ghost" id="myCarryReset">Borrar</button></div>
+      <p class="note" id="myCarryState"></p>
+      <h2>Con radar</h2>
       <p class="note">Con un radar de swing o un simulador: haz un swing, escribe lo que marcó el radar como velocidad del palo y guarda. Con 3 a 5 swings por palo la app se ajusta sola.</p>
       <p class="note" id="calibLast">Aún no hay un swing medido para comparar.</p>
       <div class="row"><label for="radarIn">Radar</label><input type="number" id="radarIn" inputmode="decimal" min="10" max="250"><span id="radarUnit">mph</span><button class="ghost primary" id="radarSave">Guardar</button></div>
@@ -285,6 +305,9 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <select id="dist"><option value="m">metros</option><option value="yd">yardas</option></select>
       <label for="hand">Juego</label>
       <select id="hand"><option value="R">Diestro</option><option value="L">Zurdo</option></select>
+      <label for="hold">Cómo sostienes el teléfono</label>
+      <select id="hold"><option value="phone">Como si fuera el palo</option><option value="club">Sujeto a un palo real</option></select>
+      <label for="invert">La bola se va al lado contrario del que debería</label><input type="checkbox" id="invert">
       <label for="voice">Leer el resultado en voz alta</label><input type="checkbox" id="voice">
       <label for="cont">Medir swing tras swing sin tocar la pantalla</label><input type="checkbox" id="cont">
     </div>
@@ -294,21 +317,34 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <summary>Cómo medir</summary>
     <div class="dbody">
       <ol>
-        <li>Sostén el teléfono con ambas manos como si fuera el grip, pantalla mirando hacia el objetivo. Mejor aún con una correa a la muñeca.</li>
+        <li>Agarra el teléfono con ambas manos como si fuera el grip del palo, con la pantalla mirando hacia el objetivo. Mejor aún con una correa a la muñeca.</li>
         <li>Toca <b>Activar sensores</b>. Desde ese momento la app está midiendo.</li>
-        <li>Quédate quieto un momento en address (suena un tono que te avisa) y haz el swing. Si no suena el tono igual se mide.</li>
-        <li>Mira el vuelo de la bola. Debajo del botón ves el giro en vivo: el swing se cuenta cuando pasa de 350°/s.</li>
-        <li>Empieza a media velocidad, lejos de personas, muebles y ventanas.</li>
+        <li>Quédate quieto un segundo en address hasta que suene el tono. Ese punto es tu referencia: desde ahí se mide el arco, el impacto y hacia dónde apunta la cara.</li>
+        <li>Haz el swing completo y quédate en el final un momento. La app sigue leyendo hasta que terminas.</li>
+        <li>Debajo del botón ves el giro en vivo. Empieza a media velocidad, lejos de personas, muebles y ventanas.</li>
       </ol>
+      <div class="row"><button class="ghost" id="introShow">Ver la guía rápida</button></div>
       <p class="note">Para instalarla: en iPhone, botón Compartir y luego <b>Agregar a inicio</b>. En Android, menú de Chrome y luego <b>Instalar app</b>.</p>
-      <p class="note">Cómo calcula: el giroscopio mide el giro de tus manos y lo convierte en velocidad del palo. Con eso y valores típicos de cada palo (salida, lanzamiento y spin) se simula el vuelo con aerodinámica real: arrastre, sustentación por el spin, viento, bote y rodado. Muchos teléfonos topan cerca de 2000°/s; cuando pasa, la app reconstruye el pico (~) o te avisa que es un mínimo (≥). La cara del palo es experimental.</p>
+      <p class="note">Cómo calcula: la app sigue la orientación del teléfono desde el address. Así sabe cuándo empezó la subida, hasta dónde llegó, el instante en que el palo vuelve a la bola (impacto), hacia dónde iba la cabeza (ruta), hacia dónde apuntaba la cara y hasta dónde terminó. La velocidad sale del giro en el impacto; en modo "como si fuera el palo" se compensa que un teléfono se gira más fácil que un palo de verdad. Con eso y valores típicos de cada palo (salida, lanzamiento y spin) se simula el vuelo con aerodinámica real: arrastre, sustentación por el spin, viento, bote y rodado. Muchos teléfonos topan cerca de 2000°/s; cuando pasa, la app reconstruye el pico (~) o te avisa que es un mínimo (≥). La cara del palo es experimental.</p>
     </div>
   </details>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="js/engine.js?v=0.4"></script>
-<script src="js/world3d.js?v=0.4"></script>
-<script src="js/app.js?v=0.4"></script>
+<div class="intro" id="intro" hidden role="dialog" aria-modal="true" aria-labelledby="introTitle">
+  <div class="box">
+    <h2 id="introTitle">Antes del primer swing</h2>
+    <ol>
+      <li><b>Agarra el teléfono como el grip</b>, con las dos manos y la pantalla mirando al objetivo. Una correa en la muñeca evita sustos.</li>
+      <li><b>Quieto en address</b> hasta oír el tono. Desde ahí se miden el arco, el impacto y la cara.</li>
+      <li><b>Swing completo hasta el final</b> y quédate ahí un instante. La bola vuela en la pantalla y escuchas el resultado.</li>
+    </ol>
+    <p class="note">¿Sin espacio para hacer el swing? Toca <b>Golpe de prueba</b> y juega igual. Puedes cambiar entre metros y yardas arriba a la derecha.</p>
+    <button class="go" id="introOk">Entendido</button>
+  </div>
+</div>
+<script src="js/engine.js?v=0.5"></script>
+<script src="js/world3d.js?v=0.5"></script>
+<script src="js/app.js?v=0.5"></script>
 </body>
 </html>

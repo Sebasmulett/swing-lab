@@ -2,28 +2,38 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.4";
+const VERSION="0.5";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data"].includes(mode)) mode="range";
-let calib=Object.assign({driver:[],iron7:[],wedge:[]}, store.get("sl2_calib",{}));
+let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
+let myCarry=store.get("sl5_mycarry",{});
 let history=store.get("sl2_hist",[]), traces=store.get("sl2_traces",[]), records=store.get("sl2_records",{});
 let rangeMarks=store.get("sl3_rangeMarks",[]);
 let course=store.get("sl4_course",null);
 let shown=null, lastReal=null, suggested=null, has3D=false;
 const saveSettings=()=>store.set("sl2_settings",S);
-const launch=(c,ms,face,ok,lie)=>SL.launchFor(c,ms,face,ok,lie,S.hand);
+const launch=(c,ms,h,lie)=>SL.launchFor(c,ms,h,lie,S.hand);
 
 // ================= Derivados y formato =================
-function factor(c){ const p=calib[c]||[]; if(!p.length) return 1; const r=p.map(x=>x.radar/x.est).sort((a,b)=>a-b), m=r.length>>1; return r.length%2?r[m]:(r[m-1]+r[m])/2; }
+const median=a=>{ const r=a.slice().sort((x,y)=>x-y), m=r.length>>1; return r.length%2?r[m]:(r[m-1]+r[m])/2; };
+const fcache=new Map();
+// Calibración: 1) radar si hay; 2) tus distancias habituales (con al menos 3 swings reales de ese palo); 3) ninguna
+function factor(c){ const p=calib[c]||[]; if(p.length) return median(p.map(x=>x.radar/x.est));
+  const mc=myCarry[c], mine=history.filter(h=>h.club===c && !h.sim).slice(0,12);
+  if(!mc || mine.length<3) return 1;
+  const key=c+"|"+mc+"|"+mine.length+"|"+(mine[0]&&mine[0].id); if(fcache.has(key)) return fcache.get(key);
+  let lo=5, hi=80; for(let i=0;i<24;i++){ const mid=(lo+hi)/2, sm=SL.simulateLocal(SL.launchFor(c,mid,null,"tee",S.hand),[0,0],null); if(sm.carry<mc) lo=mid; else hi=mid; }
+  const f=Math.max(0.5,Math.min(2,((lo+hi)/2)/median(mine.map(h=>h.msRaw)))); fcache.set(key,f); return f; }
+const calibKind=c=>(calib[c]||[]).length?"radar":(myCarry[c] && history.filter(h=>h.club===c && !h.sim).length>=3)?"distancias":null;
 const dcache=new Map();
 function derive(h){
   const ms=h.msRaw*factor(h.club), key=h.id+"|"+ms.toFixed(3)+"|"+S.hand; if(dcache.has(key)) return dcache.get(key);
-  const sim=SL.simulateLocal(launch(h.club,ms,h.face,h.faceOk,"tee"),[0,0],null);
-  const out={ms, carry:sim.carry, total:Math.hypot(sim.x,sim.z), lat:sim.x, apex:sim.apex, ball:sim.ball};
+  const sim=SL.simulateLocal(launch(h.club,ms,h,"tee"),[0,0],null);
+  const out={ms, carry:sim.carry, total:Math.hypot(sim.x,sim.z), lat:sim.x, latLand:sim.landX, apex:sim.apex, ball:sim.ball, launch:sim.launch, spin:sim.spin};
   dcache.set(key,out); if(dcache.size>800) dcache.clear(); return out;
 }
 function fmtSpeed(ms){ if(S.units==="kmh") return {v:(ms*3.6).toFixed(0),u:"km/h",say:"kilómetros por hora"};
@@ -34,6 +44,16 @@ const fmtDist=m=>S.dist==="yd"?Math.round(m/0.9144)+" yd":Math.round(m)+" m";
 const sayDist=m=>S.dist==="yd"?Math.round(m/0.9144)+" yardas":Math.round(m)+" metros";
 const fmtLat=l=>Math.abs(l)<1?"Centro":fmtDist(Math.abs(l))+(l>0?" der":" izq");
 const fmtRatio=r=>r?r.toFixed(1)+":1":"—";
+function fmtPath(h){ if(!h.pathOk) return "—"; const a=Math.abs(h.path); if(a<1.5) return "Recta"; return a.toFixed(0)+"° "+(h.path>0?"adentro-afuera":"afuera-adentro"); }
+const fmtArc=h=>h.arcTop==null?"—":h.arcTop+"°";
+// Forma del tiro según el plano D (perspectiva de diestro; la app espeja para zurdos)
+function shapeName(h){ if(!h.faceOk) return null; const p=h.pathOk?h.path:0, start=0.78*h.face+0.22*p, curve=h.face-p;
+  const side=start>2?"right":start<-2?"left":"mid", c=curve>6?"slice":curve>2?"fade":curve<-6?"hook":curve<-2?"draw":"straight";
+  const R_=S.hand==="R";
+  if(c==="straight") return side==="mid"?"Recto":(side==="right")===R_?"Push":"Pull";
+  if(c==="fade") return side==="left"?(R_?"Fade":"Push-draw"):side==="right"?(R_?"Push-fade":"Draw"):(R_?"Fade":"Draw");
+  if(c==="draw") return side==="right"?(R_?"Draw":"Pull-fade"):side==="left"?(R_?"Pull-draw":"Fade"):(R_?"Draw":"Fade");
+  if(c==="slice") return R_?"Slice":"Hook"; return R_?"Hook":"Slice"; }
 function fmtFace(h){ if(!h.faceOk) return "—"; const a=Math.abs(h.face); if(a<1.5) return "Cuadrada"; return a.toFixed(0)+"° "+(h.face>0?"abierta":"cerrada"); }
 const prefixFor=h=>h.sat?(h.method==="fit"?"~":"≥"):"";
 
@@ -66,11 +86,11 @@ let shotSeq=0;
 // ================= Range =================
 function setupRange(){ if(!has3D) return; World.setRange({um:S.dist==="yd"?0.9144:1}); World.setMarks(rangeMarks); World.address(0,0,0,true); }
 function rangeShot(h){
-  const dv=derive(h), sim=SL.simulateLocal(launch(h.club,dv.ms,h.face,h.faceOk,"tee"),[0,0],null);
+  const dv=derive(h), sim=SL.simulateLocal(launch(h.club,dv.ms,h,"tee"),[0,0],null);
   const pts=toWorld(sim.pts,0,0,0), seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false;
   World.playShot({pts, landT:sim.landT, onLand:sfx.land, onEnd:()=>{
     $("skip").hidden=true; rangeMarks.push({x:+sim.x.toFixed(1),z:+sim.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
-    World.setMarks(rangeMarks); showCard(sim); renderHud();
+    World.setMarks(rangeMarks); showCard(sim); renderHud(); const sh=shapeName(h); if(sh) setHudMsg(sh);
     setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range") World.address(0,0,0,true); },3800); }});
 }
 
@@ -91,10 +111,10 @@ function setupHole(announce){
     say(`Hoyo ${course.hole+1}, par ${h.par}, ${sayDist(h.L)}.`+(w.s>0.3?` Viento de ${Math.round(w.s)} metros por segundo.`:" Sin viento.")); }
 }
 function expectedTotal(c,lie){ const mine=history.filter(h=>h.club===c), ms=mine.length?mine.slice(0,10).reduce((a,h)=>a+h.msRaw*factor(c),0)/Math.min(10,mine.length):CLUBS[c].def;
-  const s=SL.simulateLocal(launch(c,ms,0,false,lie),[0,0],null); return Math.hypot(s.x,s.z); }
+  const s=SL.simulateLocal(launch(c,ms,null,lie),[0,0],null); return Math.hypot(s.x,s.z); }
 function suggestClub(){
   if(mode!=="course" || !course || course.holed){ suggested=null; renderChips(); return; }
-  const R=distToPin(), allowed=SL.CLUB_ORDER.filter(c=>c!=="driver" || course.lie==="tee" || course.lie==="fairway");
+  const R=distToPin(), allowed=SL.CLUB_ORDER.filter(c=>c==="driver"?course.lie==="tee":c==="wood3"?(course.lie==="tee"||course.lie==="fairway"):(course.lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
   const opts=allowed.map(c=>({c,t:expectedTotal(c,course.lie)}));
   suggested=(opts.find(o=>o.t>=R*0.92)||opts[opts.length-1]).c; if(suggested!==club) setClub(suggested,true); renderChips();
 }
@@ -113,7 +133,7 @@ function courseShot(h){
   if(course.holed) nextHole();
   const hole=HOLES[course.hole], yaw=holeYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole];
   const f=[Math.sin(yaw),Math.cos(yaw)], r=[Math.cos(yaw),-Math.sin(yaw)], windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
-  const dv=derive(h), o=launch(h.club,dv.ms,h.face,h.faceOk,course.lie);
+  const dv=derive(h), o=launch(h.club,dv.ms,h,course.lie);
   const sim=SL.simulateLocal(o, windLocal, (lx,lz)=>SL.lieAt(hole, ox+r[0]*lx+f[0]*lz, oz+r[1]*lx+f[1]*lz));
   const pts=toWorld(sim.pts,ox,oz,yaw), fx=ox+r[0]*sim.x+f[0]*sim.z, fz=oz+r[1]*sim.x+f[1]*sim.z;
   const endLie = sim.landG==="water"||sim.landG==="ob" ? sim.landG : SL.lieAt(hole,fx,fz);
@@ -194,7 +214,9 @@ function verdictFor(h){
   else if(h.ratio>=2.6 && h.ratio<=3.4) p.push("<em>Tempo de libro.</em> Cerca del 3:1 de los profesionales.");
   else if(h.ratio<2.6) p.push("<em>Subida apurada.</em> Lleva el palo arriba más lento y deja que la bajada acelere.");
   else p.push("<em>Subida muy lenta</em> o pausa arriba. Busca un ritmo continuo.");
-  if(h.faceOk && Math.abs(h.face)>=4) p.push(h.face>0?"La cara llegó abierta: la bola se va "+(S.hand==="R"?"a la derecha.":"a la izquierda."):"La cara llegó cerrada: la bola se va "+(S.hand==="R"?"a la izquierda.":"a la derecha."));
+  if(h.arcTop!=null){ p.push(h.len==="completo"?`Swing completo: ${h.arcTop}° de subida y ${h.arcFin}° de final.`:h.len==="tres cuartos"?`Tres cuartos de swing (${h.arcTop}° de subida).`:`Medio swing (${h.arcTop}° de subida): para pegar más lejos, sube más el palo.`);
+    if(h.arcFin!=null && h.arcFin<h.arcTop*0.6) p.push("Frenaste el final: termina el swing con las manos arriba."); }
+  const sh=shapeName(h); if(sh) p.push(`<em>${sh}.</em> Cara ${fmtFace(h).toLowerCase()}`+(h.pathOk?`, ruta ${fmtPath(h).toLowerCase()}.`:"."));
   if(h.sat) p.push(h.method==="fit"?"El sensor topó y reconstruí el pico.":"El sensor topó: tu velocidad real es mayor que esta.");
   if(h.sim) p.push("Golpe de prueba generado, no se guarda.");
   return p.join(" ");
@@ -204,11 +226,12 @@ function renderBoard(h,flash){
   if(!h) return; b.classList.remove("stale");
   const dv=derive(h), s=fmtSpeed(dv.ms);
   $("prefix").textContent=prefixFor(h); $("speed").textContent=s.v; $("unitLab").textContent=s.u;
-  $("tempo").textContent=fmtRatio(h.ratio);
-  $("times").textContent=h.back!=null?(h.back/1000).toFixed(2)+"/"+(h.down/1000).toFixed(2)+"s":"—";
-  $("carry").textContent=fmtDist(dv.carry); $("face").textContent=fmtFace(h);
-  $("clubLab").textContent=CLUBS[h.club].name; $("calibTag").textContent=(calib[h.club]||[]).length?"· calibrado":"";
-  $("quality").textContent=`Sensor a ${h.hz} lecturas por segundo · pico ${h.peak}°/s${h.sat?" (sensor saturado)":""}.`+(h.hz<90?" A menos de 90 por segundo el pico puede quedar un poco bajo.":"");
+  $("tempo").textContent=fmtRatio(h.ratio); $("tempoSub").textContent=h.back!=null?(h.back/1000).toFixed(2)+" / "+(h.down/1000).toFixed(2)+" s":"";
+  $("arc").textContent=fmtArc(h); $("arcSub").textContent=h.arcFin!=null?"final "+h.arcFin+"°":"";
+  $("face").textContent=fmtFace(h); $("path").textContent=fmtPath(h);
+  $("carry").textContent=fmtDist(dv.carry);
+  $("clubLab").textContent=CLUBS[h.club].name; const ck=calibKind(h.club); $("calibTag").textContent=ck?"· calibrado con "+ck:"";
+  $("quality").textContent=`Sensor a ${h.hz} lecturas por segundo · giro en el impacto ${h.omega??h.peak}°/s${h.sat?" (sensor saturado)":""}`+(h.aoa&&h.pathOk?` · ataque ${h.aoa>0?"+":""}${h.aoa}°`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<90?" A menos de 90 lecturas por segundo el pico puede quedar un poco bajo.":"");
 }
 const setVerdict=html=>{ $("verdict").innerHTML=html; };
 function renderHist(){
@@ -216,7 +239,7 @@ function renderHist(){
   if(!history.length) tb.innerHTML='<tr><td colspan="7" class="note">Aún no hay swings guardados.</td></tr>';
   else{ const best={}; history.forEach(h=>{ const m=derive(h).ms; if(!(best[h.club]>=m)) best[h.club]=m; });
     tb.innerHTML=history.slice(0,25).map((h,i)=>{ const dv=derive(h), s=fmtSpeed(dv.ms);
-      return `<tr><td>${history.length-i}</td><td>${CLUBS[h.club].name}</td><td class="${dv.ms===best[h.club]?"best":""}">${prefixFor(h)}${s.v} ${s.u}</td><td>${fmtRatio(h.ratio)}</td><td>${fmtDist(dv.carry)}</td><td>${fmtDist(dv.total)}</td><td>${fmtFace(h)}</td></tr>`; }).join(""); }
+      return `<tr><td>${history.length-i}</td><td>${CLUBS[h.club].name}</td><td class="${dv.ms===best[h.club]?"best":""}">${prefixFor(h)}${s.v} ${s.u}</td><td>${fmtRatio(h.ratio)}</td><td>${fmtDist(dv.carry)}</td><td>${fmtDist(dv.total)}</td><td>${shapeName(h)||"—"}</td></tr>`; }).join(""); }
   const mine=history.filter(h=>h.club===club), sp=mine.map(h=>toUnit(derive(h).ms)), u=fmtSpeed(1).u;
   if(!sp.length){ ["kAvg","kBest","kStd","kStreak"].forEach(k=>$(k).textContent="—"); $("kNote").textContent="Aún no hay swings con "+CLUBS[club].name+"."; return; }
   const avg=sp.reduce((a,b)=>a+b,0)/sp.length, sd=Math.sqrt(sp.reduce((a,b)=>a+(b-avg)**2,0)/sp.length);
@@ -229,15 +252,16 @@ function renderHist(){
 function drawTrace(){
   const cv=$("plot"); if(cv.closest("[hidden]")) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
   cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,W,H);
-  const tr=shown && shown.trace; if(!tr) return;
-  let lo=0, hi=0; tr.d.forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
+  const tr=shown && shown.trace; if(!tr) return; drawSwingViz();
+  const usePhi=!!tr.phi; const D=usePhi?tr.phi.map(v=>v??0):tr.d;
+  let lo=0, hi=0; D.forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
   const T=tr.t[tr.t.length-1]||1, pad=16, x=t=>pad+t/T*(W-2*pad), y=v=>pad+(hi-v)/(hi-lo||1)*(H-2*pad-14);
   c.strokeStyle=css("--line"); c.lineWidth=1; c.beginPath(); c.moveTo(pad,y(0)); c.lineTo(W-pad,y(0)); c.stroke();
-  const seg=(a,b,col)=>{ c.strokeStyle=col; c.lineWidth=2.5; c.beginPath(); for(let i=a;i<=b;i++){ const X=x(tr.t[i]),Y=y(tr.d[i]); i===a?c.moveTo(X,Y):c.lineTo(X,Y);} c.stroke(); };
+  const seg=(a,b,col)=>{ c.strokeStyle=col; c.lineWidth=2.5; c.beginPath(); for(let i=a;i<=b;i++){ const X=x(tr.t[i]),Y=y(D[i]); i===a?c.moveTo(X,Y):c.lineTo(X,Y);} c.stroke(); };
   const top=tr.top ?? 0; seg(0,top,css("--muted")); seg(top,tr.d.length-1,css("--accent"));
   c.fillStyle=css("--ink"); c.font="13px "+css("--body"); c.textAlign="center";
-  const mark=(i,ch,dy)=>{ if(i!=null) c.fillText(ch,x(tr.t[i]),y(tr.d[i])+dy); }; mark(tr.start,"▲",16); mark(tr.top,"●",16); mark(tr.imp,"★",-8);
-  c.fillStyle=css("--muted"); c.font="11px "+css("--body"); c.textAlign="left"; c.fillText("giro °/s",pad,H-4); c.textAlign="right"; c.fillText((T/1000).toFixed(1)+" s",W-pad,H-4);
+  const mark=(i,ch,dy)=>{ if(i!=null) c.fillText(ch,x(tr.t[i]),y(D[i])+dy); }; mark(tr.start,"▲",16); mark(tr.top,"●",usePhi?-8:16); mark(tr.imp,"★",usePhi?16:-8); if(tr.fin!=null) mark(tr.fin,"■",16);
+  c.fillStyle=css("--muted"); c.font="11px "+css("--body"); c.textAlign="left"; c.fillText(usePhi?"ángulo del palo (°)":"giro °/s",pad,H-4); c.textAlign="right"; c.fillText((T/1000).toFixed(1)+" s",W-pad,H-4);
 }
 function drawField(){
   const cv=$("range"); if(cv.closest("[hidden]")) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
@@ -261,11 +285,20 @@ function drawField(){
 function renderCalib(){
   const u=fmtSpeed(1).u; $("radarUnit").textContent=u;
   if(lastReal){ const v=toUnit(lastReal.msRaw); $("calibLast").textContent=`Último swing (${CLUBS[lastReal.club].name}), sin calibrar: ${v.toFixed(S.units==="ms"?1:0)} ${u}. ¿Cuánto marcó el radar?`; }
+  const mc=myCarry[club], nReal=history.filter(h=>h.club===club && !h.sim).length;
+  $("myCarryIn").value = mc ? (S.dist==="yd"?Math.round(mc/0.9144):Math.round(mc)) : ""; $("myCarryUnit").textContent=S.dist==="yd"?"yd":"m"; $("myCarryClub").textContent=CLUBS[club].name;
+  $("myCarryState").textContent = !mc ? `Escribe cuánto vuela normalmente tu ${CLUBS[club].name} (carry).` :
+     nReal<3 ? `Guardado. Haz ${3-nReal} swing${3-nReal>1?"s":""} real${3-nReal>1?"es":""} más con el ${CLUBS[club].name} para ajustar.` :
+     (calib[club]||[]).length ? "Este palo ya está calibrado con radar; el radar tiene prioridad." : `Ajustado: tu swing típico con el ${CLUBS[club].name} ahora vuela ${fmtDist(mc)}.`;
   const p=calib[club]||[]; $("calibState").textContent=p.length?`${CLUBS[club].name}: ${p.length} swing${p.length>1?"s":""} comparados, factor ${factor(club).toFixed(2)}.`+(p.length<3?" Agrega algunos más para que sea confiable.":""):`${CLUBS[club].name}: sin calibrar.`;
 }
+function buildChips(){ const row=$("clubRow"); row.innerHTML=Object.keys(CLUBS).map(k=>`<button class="chip" data-club="${k}" aria-pressed="false">${CLUBS[k].name}</button>`).join("");
+  row.querySelectorAll(".chip").forEach(b=>b.addEventListener("click",()=>{ setClub(b.dataset.club); renderHud(); })); }
 function renderChips(){ document.querySelectorAll(".chip").forEach(x=>{ x.setAttribute("aria-pressed",String(x.dataset.club===club));
   const old=x.querySelector(".sug"); if(old) old.remove();
-  if(mode==="course" && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } }); }
+  if(mode==="course" && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } });
+  const cur=document.querySelector('.chip[aria-pressed="true"]'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"}); }catch(_){} 
+  document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
 function renderAll(){ renderBoard(shown,false); renderHist(); drawTrace(); drawField(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
 
 // ================= Resultado de un swing =================
@@ -273,19 +306,25 @@ function handleResult(res){
   lastPeakSeen = res.obs ?? res.peak ?? lastPeakSeen;
   if(res.error){ $("board").classList.add("stale"); setVerdict(res.error); beep(220,0.25); say("No reconocí el swing"); updateLive(); return; }
   const {rawSamples,...h}=res;
+  if(S.invert && !h.sim){ h.face=-h.face; h.path=-h.path; }
   if(!h.sim){ history.unshift(h); history=history.slice(0,300); store.set("sl2_hist",history);
     traces.unshift({id:h.id, club:h.club, hz:h.hz, s:rawSamples}); traces=traces.slice(0,25); store.set("sl2_traces",traces); lastReal=h; }
   shown=h; renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawTrace(); drawField(); renderCalib(); updateLive();
   if(navigator.vibrate) try{ navigator.vibrate(60); }catch(_){}
   const dv=derive(h), s=fmtSpeed(dv.ms);
-  if(mode==="range" && has3D){ rangeShot(h); say(`${s.v} ${s.say}. Carry ${sayDist(dv.carry)}.`); }
+  const sh=shapeName(h);
+  if(mode==="range" && has3D){ rangeShot(h); say(`${s.v} ${s.say}. Carry ${sayDist(dv.carry)}.`+(sh?` ${sh}.`:"")); }
   else if(mode==="course" && has3D) courseShot(h);
   else say(`${s.v} ${s.say}.`+(h.ratio?` Tempo ${h.ratio.toFixed(1).replace(".",",")} a 1.`:""));
 }
 
 // ================= Sensores =================
 // Se mide siempre que los sensores estén activos: quedarse quieto solo sirve para el tono y para afinar la medición.
-const TRIGGER=350, CAPTURE_MS=500, COOLDOWN_MS=1300;
+const TRIGGER=350, QUIET=80, QUIET_MS=260, MAX_CAPTURE=2400, COOLDOWN_MS=1100;
+const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+let lastG=null, capStart=0, quietSince=null, capMax=0;
+// gravedad del teléfono (convención Android: el vector apunta hacia arriba). Safari la entrega con el signo contrario.
+function onGravity(e){ const a=e.accelerationIncludingGravity; if(!a || a.x==null) return; const k=IOS?-1:1; lastG=[a.x*k,a.y*k,a.z*k]; }
 let phase="off", buf=[], captureEnd=0, stillSince=null, cooldownUntil=0, lastEvent=0, wake=null, gyro=null, hzTimes=[];
 let unitScale=1, unitLocked=false, maxRm=0, radVotes=0, liveRate=0, lastPeakSeen=null, readyBeeped=false;
 function setPhase(p){
@@ -296,25 +335,32 @@ function setPhase(p){
   else if(p==="capturing"){ g.textContent="Leyendo swing…"; g.classList.add("ready"); }
 }
 function onSample(s){
-  lastEvent=s.t; buf.push(s); while(buf.length && s.t-buf[0].t>4000) buf.shift();
+  if(!s.g && lastG) s.g=lastG;
+  lastEvent=s.t; buf.push(s); while(buf.length && s.t-buf[0].t>6000) buf.shift();
   hzTimes.push(s.t); if(hzTimes.length>120) hzTimes.shift();
   const m=Math.hypot(s.x,s.y,s.z); liveRate=m;
   if(phase==="armed"){
     if(s.t<cooldownUntil){ stillSince=null; return; }
     if(m<25){ if(stillSince==null) stillSince=s.t; else if(!readyBeeped && s.t-stillSince>=400){ readyBeeped=true; setPhase("armed"); if(S.guide) playRhythm(); else beep(880,0.08); } }
     else if(m>40) stillSince=null;
-    if(m>TRIGGER){ setPhase("capturing"); captureEnd=s.t+CAPTURE_MS; clearTimeout(capTimer); capTimer=setTimeout(finishCapture,CAPTURE_MS+150); }
-  } else if(phase==="capturing" && s.t>=captureEnd) finishCapture();
+    if(m>TRIGGER){ setPhase("capturing"); capStart=s.t; quietSince=null; capMax=m; clearTimeout(capTimer); capTimer=setTimeout(finishCapture,MAX_CAPTURE+200); }
+  } else if(phase==="capturing"){
+    // se sigue leyendo hasta que el swing termina: el giro queda bajo por un rato (la pausa de arriba es mucho más corta)
+    capMax=Math.max(capMax,m);
+    if(m<QUIET){ if(quietSince==null) quietSince=s.t; } else quietSince=null;
+    const quiet = quietSince!=null && s.t-quietSince>=QUIET_MS && capMax>TRIGGER*1.25 && s.t-capStart>300;
+    if(quiet || s.t-capStart>=MAX_CAPTURE) finishCapture();
+  }
 }
 let capTimer=0;
 function finishCapture(){
   clearTimeout(capTimer); if(phase!=="capturing") return;
-  handleResult(SL.analyze(buf.slice(), club));
+  handleResult(SL.analyze(buf.slice(), club, {mode:S.hold, hand:S.hand}));
   cooldownUntil=performance.now()+COOLDOWN_MS; stillSince=null; readyBeeped=false; buf=[];
   setPhase(S.cont?"armed":"idle");
 }
 function onMotion(e){
-  const r=e.rotationRate; if(!r || (r.alpha==null && r.beta==null && r.gamma==null)) return;
+  onGravity(e); const r=e.rotationRate; if(!r || (r.alpha==null && r.beta==null && r.gamma==null)) return;
   let x=r.beta||0, y=r.gamma||0, z=r.alpha||0;
   // Algunos navegadores entregan rad/s en vez de °/s: si hay mucha aceleración con giro mínimo, corrige la unidad
   if(!unitLocked){ const a=e.accelerationIncludingGravity, am=a?Math.hypot(a.x||0,a.y||0,a.z||0):0, rm=Math.hypot(x,y,z);
@@ -337,6 +383,7 @@ async function enable(){
     catch(err){ msg("No pude pedir permiso de movimiento: "+err.message,true); return; } }
   let ok=false; if("Gyroscope" in window) ok=await tryGenericGyro();
   if(!ok){ if(typeof DeviceMotionEvent==="undefined"){ msg("Este dispositivo no tiene giroscopio. Usa Golpe de prueba.",true); return; } window.addEventListener("devicemotion",onMotion); }
+  else window.addEventListener("devicemotion",onGravity);   // el giroscopio rápido no trae gravedad
   keepAwake(); readyBeeped=false; cooldownUntil=performance.now()+600; setPhase("armed");
   setTimeout(()=>{ if(!lastEvent) msg("No llegan datos del giroscopio. En iPhone revisa Ajustes › Safari › Movimiento y orientación. También puedes usar Golpe de prueba.",true); },1500);
 }
@@ -357,11 +404,11 @@ function testShot(){
   audio(); const c=CLUBS[club]; let ms;
   if(mode==="course" && course && !course.holed && !course.done){
     const target=distToPin(); let lo=c.def*0.15, hi=c.def*1.08;
-    for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,0,false,course.lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
+    for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,null,course.lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
     ms=(lo+hi)/2*(1+gauss()*0.05);
   } else ms=c.def*(0.92+Math.random()*0.16);
-  const peak=ms/factor(club)/(c.radius*DEG)/0.965;
-  const res=SL.analyze(SL.synthSwing({hz:100, peak, face:gauss()*4, back:760+Math.random()*120, down:250+Math.random()*50}), club);
+  const peak=SL.omegaFor(club, ms/factor(club), S.hold)*1.005, full=c.def*0.85, frac=Math.min(1,ms/full);
+  const res=SL.analyze(SL.synthKin({hz:100, peak, face:gauss()*2.5, path:gauss()*3.5, hand:S.hand, top:110+frac*140+gauss()*8, finish:120+frac*140, back:640+frac*200+gauss()*40, down:255+gauss()*15}), club, {mode:S.hold, hand:S.hand});
   if(!res.error) res.sim=true; handleResult(res);
 }
 $("testShot").addEventListener("click",testShot);
@@ -369,7 +416,6 @@ $("view").addEventListener("click",()=>World.skip());
 
 // ================= Modos y controles =================
 function setClub(c,silent){ club=c; store.set("sl2_club",club); $("clubLab").textContent=CLUBS[club].name; if(!silent) renderAll(); else renderChips(); }
-document.querySelectorAll(".chip").forEach(b=>b.addEventListener("click",()=>{ setClub(b.dataset.club); renderHud(); }));
 function setMode(m){
   mode=m; store.set("sl3_mode",mode);
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
@@ -391,8 +437,16 @@ $("newRound").addEventListener("click",()=>{ $("card").hidden=true; setHudMsg(nu
 $("playRhythm").addEventListener("click",playRhythm);
 const bindSel=(id,key,after)=>{ $(id).value=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.value; saveSettings(); dcache.clear(); renderAll(); after&&after(); }); };
 const bindChk=(id,key)=>{ $(id).checked=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.checked; saveSettings(); }); };
-bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand"); bindSel("guideRatio","guideRatio");
-bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide");
+function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear(); renderAll(); if(mode==="range") setupRange(); }
+bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand"); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
+bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
+document.querySelectorAll("#distSeg button").forEach(b=>b.addEventListener("click",()=>setDist(b.dataset.d)));
+$("myCarrySave").addEventListener("click",()=>{ const v=parseFloat($("myCarryIn").value);
+  if(!(v>5 && v<400)){ msg("Escribe una distancia válida para el "+CLUBS[club].name+".",true); return; }
+  myCarry[club]=S.dist==="yd"?v*0.9144:v; store.set("sl5_mycarry",myCarry); fcache.clear(); dcache.clear(); msg(""); renderAll(); });
+$("myCarryReset").addEventListener("click",()=>{ delete myCarry[club]; store.set("sl5_mycarry",myCarry); fcache.clear(); dcache.clear(); renderAll(); });
+$("introOk").addEventListener("click",()=>{ $("intro").hidden=true; store.set("sl5_intro",true); });
+$("introShow").addEventListener("click",()=>{ $("intro").hidden=false; });
 $("radarSave").addEventListener("click",()=>{
   const v=parseFloat($("radarIn").value);
   if(!lastReal){ msg("Primero mide un swing real y luego escribe lo que marcó el radar.",true); return; }
@@ -408,17 +462,50 @@ $("clearYes").addEventListener("click",()=>{ history=[]; traces=[]; rangeMarks=[
 function download(name,type,text){ const url=URL.createObjectURL(new Blob([text],{type})); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000); }
 const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
 $("expCsv").addEventListener("click",()=>{
-  const rows=[["fecha","palo","velocidad_palo_ms","velocidad_palo_mph","factor_calibracion","velocidad_bola_ms","tempo","subida_s","bajada_s","cara_grados","cara_valida","carry_m","total_m","lateral_m","altura_m","pico_gyro_dps","saturado","metodo_pico","hz"]];
-  history.forEach(h=>{ const dv=derive(h); rows.push([new Date(h.at).toISOString(),CLUBS[h.club].name,dv.ms.toFixed(2),(dv.ms*2.23694).toFixed(1),factor(h.club).toFixed(3),dv.ball.toFixed(1),h.ratio?h.ratio.toFixed(2):"",h.back!=null?(h.back/1000).toFixed(3):"",h.down!=null?(h.down/1000).toFixed(3):"",h.face,h.faceOk,dv.carry.toFixed(1),dv.total.toFixed(1),dv.lat.toFixed(1),dv.apex.toFixed(1),h.peak,h.sat,h.method,h.hz]); });
+  const rows=[["fecha","palo","velocidad_palo_ms","velocidad_palo_mph","factor_calibracion","velocidad_bola_ms","tempo","subida_s","bajada_s","cara_grados","cara_valida","ruta_grados","ruta_valida","ataque_grados","arco_subida","arco_final","forma","carry_m","total_m","lateral_m","altura_m","pico_gyro_dps","saturado","metodo_pico","hz"]];
+  history.forEach(h=>{ const dv=derive(h); rows.push([new Date(h.at).toISOString(),CLUBS[h.club].name,dv.ms.toFixed(2),(dv.ms*2.23694).toFixed(1),factor(h.club).toFixed(3),dv.ball.toFixed(1),h.ratio?h.ratio.toFixed(2):"",h.back!=null?(h.back/1000).toFixed(3):"",h.down!=null?(h.down/1000).toFixed(3):"",h.face,h.faceOk,h.path??"",h.pathOk??"",h.aoa??"",h.arcTop??"",h.arcFin??"",shapeName(h)||"",dv.carry.toFixed(1),dv.total.toFixed(1),dv.lat.toFixed(1),dv.apex.toFixed(1),h.peak,h.sat,h.method,h.hz]); });
   download(`swing-lab-${stamp()}.csv`,"text/csv",rows.map(r=>r.join(",")).join("\n")); });
 $("expJson").addEventListener("click",()=>{ download(`swing-lab-crudo-${stamp()}.json`,"application/json",JSON.stringify({app:"Swing Lab",version:VERSION,exported:new Date().toISOString(),
-  units:"t_ms, gyro x/y/z en grados por segundo (marco del teléfono)", calib, swings:history, traces},null,1)); });
+  units:"t_ms, gyro x/y/z en °/s y gravedad gx/gy/gz en m/s² (marco del teléfono, gravedad hacia arriba)", modo:S.hold, calib, swings:history, traces},null,1)); });
 window.addEventListener("resize",()=>{ if(has3D) World.resize(); drawTrace(); drawField(); drawMini(); });
+
+// ================= Diagrama del swing =================
+function drawSwingViz(){
+  const cv=$("swingViz"); if(!cv || cv.closest("[hidden]")) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,W,H);
+  const h=shown; if(!h) return; const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line");
+  // izquierda: arco del swing visto de frente
+  const cx=W*0.27, cy=H*0.55, r=Math.min(W*0.2,H*0.38);
+  c.strokeStyle=line; c.lineWidth=1; c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.stroke();
+  c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="center"; c.fillText("Arco",cx,14);
+  const ang=d=>Math.PI/2 - (S.hand==="R"?-1:1)*d*DEG;   // 0° = palo abajo (address)
+  const ray=(d,col,w)=>{ c.strokeStyle=col; c.lineWidth=w; c.beginPath(); c.moveTo(cx,cy); c.lineTo(cx+Math.cos(ang(d))*r, cy+Math.sin(ang(d))*r); c.stroke(); };
+  if(h.arcTop!=null){
+    c.strokeStyle=mut; c.lineWidth=6; c.globalAlpha=0.35; c.beginPath(); c.arc(cx,cy,r*0.82,Math.min(ang(0),ang(h.arcTop)),Math.max(ang(0),ang(h.arcTop))); c.stroke();
+    c.strokeStyle=acc; c.beginPath(); c.arc(cx,cy,r*0.68,Math.min(ang(0),ang(-h.arcFin)),Math.max(ang(0),ang(-h.arcFin))); c.stroke(); c.globalAlpha=1;
+    ray(0,ink,2); ray(h.arcTop,mut,2); ray(-h.arcFin,acc,2);
+    c.fillStyle=ink; c.font="600 12px "+css("--body"); c.fillText(`subida ${h.arcTop}° · final ${h.arcFin}°`,cx,H-6);
+  } else { c.fillStyle=mut; c.fillText("Quédate quieto antes del swing",cx,cy); c.fillText("para medir el arco",cx,cy+14); }
+  // derecha: cara y ruta vistas desde arriba
+  const ox=W*0.74, oy=H*0.62, L=Math.min(W*0.2,H*0.42);
+  c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="center"; c.fillText("Impacto visto desde arriba",ox,14);
+  c.setLineDash([4,4]); c.strokeStyle=line; c.lineWidth=1.5; c.beginPath(); c.moveTo(ox,oy+L*0.5); c.lineTo(ox,oy-L*1.1); c.stroke(); c.setLineDash([]);
+  c.fillStyle=mut; c.fillText("objetivo",ox,oy-L*1.1-4);
+  const dir=(deg,len,col,label)=>{ const a=-Math.PI/2+(S.hand==="R"?1:-1)*deg*DEG*3; const ex=ox+Math.cos(a)*len, ey=oy+Math.sin(a)*len;
+    c.strokeStyle=col; c.fillStyle=col; c.lineWidth=3; c.beginPath(); c.moveTo(ox,oy); c.lineTo(ex,ey); c.stroke();
+    c.beginPath(); c.arc(ex,ey,3.5,0,Math.PI*2); c.fill(); c.font="600 11px "+css("--body"); c.textAlign=ex>=ox?"left":"right"; c.fillText(label,ex+(ex>=ox?6:-6),ey+4); };
+  if(h.pathOk) dir(h.path,L*0.9,mut,"ruta "+(h.path>0?"+":"")+h.path.toFixed(0)+"°");
+  if(h.faceOk) dir(h.face,L,acc,"cara "+(h.face>0?"+":"")+h.face.toFixed(0)+"°");
+  c.fillStyle=ink; c.beginPath(); c.arc(ox,oy,4,0,Math.PI*2); c.fill();
+  c.textAlign="center"; c.font="600 12px "+css("--body"); c.fillText(shapeName(h)||"",ox,H-6);
+}
 
 // ================= Arranque =================
 has3D = World.init($("sim"));
 if(!has3D) msg("Tu navegador no pudo cargar la vista 3D. La medición del swing sí funciona.",true);
-const ex=SL.analyze(SL.synthSwing(),club); if(!ex.error){ const {rawSamples,...h}=ex; h.example=true; h.sim=true; shown=h; }
+buildChips();
+const ex=SL.analyze(SL.synthKin({hz:100,peak:1700,face:1.5,path:-1}),club,{mode:S.hold,hand:S.hand}); if(!ex.error){ const {rawSamples,...h}=ex; h.example=true; h.sim=true; shown=h; }
+if(!store.get("sl5_intro",false)) $("intro").hidden=false;
 if(window.top!==window){ $("expCsv").hidden=true; $("expJson").hidden=true; }
 setClub(club,true); setMode(mode);
 setVerdict("Swing de ejemplo. Activa los sensores para medir el tuyo, o toca Golpe de prueba para ver la simulación.");
