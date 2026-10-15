@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.7";
+const VERSION="0.8";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -13,7 +13,12 @@ let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), s
 let myCarry=store.get("sl5_mycarry",{});
 let history=store.get("sl2_hist",[]), traces=store.get("sl2_traces",[]), records=store.get("sl2_records",{});
 let rangeMarks=store.get("sl3_rangeMarks",[]);
-let course=store.get("sl4_course",null);
+// campos: cada uno guarda su propia ronda en curso
+let rounds=store.get("sl8_rounds",null); if(!rounds){ rounds={}; const old=store.get("sl4_course",null); if(old) rounds.swinglab=old; }
+let courseId=store.get("sl8_courseId","standrews"), CUR=SL.courseById(courseId); courseId=CUR.id;
+let HOLES=CUR.holes;
+const validRound=c=>c && c.hole>=0 && c.hole<HOLES.length && Array.isArray(c.wind) && c.wind.length===HOLES.length;
+let course=validRound(rounds[courseId])?rounds[courseId]:null;
 let shown=null, lastReal=null, suggested=null, has3D=false;
 const saveSettings=()=>store.set("sl2_settings",S);
 const launch=(c,ms,h,lie)=>SL.launchFor(c,ms,h,lie,S.hand);
@@ -83,7 +88,7 @@ function say(txt){ if(!S.voice || !("speechSynthesis" in window)) return;
 const rightOf=yaw=>[-Math.cos(yaw),Math.sin(yaw)];
 const toWorld=(pts,ox,oz,yaw)=>{ const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw);
   return pts.map(p=>({t:p.t, x:ox+r[0]*p.x+f[0]*p.z, y:p.y, z:oz+r[1]*p.x+f[1]*p.z})); };
-function setHudMsg(t){ const m=$("hudMsg"); if(!t){ m.hidden=true; return; } m.textContent=t; m.hidden=false; }
+function setHudMsg(t){ const m=$("hudMsg"); m.classList.remove("hint"); if(!t){ m.hidden=true; return; } m.textContent=t; m.hidden=false; }
 function showCard(sim,toTarget){ $("cCarry").textContent=fmtDist(sim.carry); $("cTotal").textContent=fmtDist(Math.hypot(sim.x,sim.z));
   $("cLat").textContent=fmtLat(sim.x); $("cApex").textContent=fmtDist(sim.apex); $("cBall").textContent=fmtSpeed(sim.ball).v+" "+fmtSpeed(1).u;
   $("cTgt").textContent=toTarget!=null?fmtDist(toTarget):"—"; $("card").hidden=false; }
@@ -92,26 +97,27 @@ function showCard(sim,toTarget){ $("cCarry").textContent=fmtDist(sim.carry); $("
 let rangeAim=store.get("sl7_rangeAim",{x:6,z:150}), aimMode=false, rangeProx=store.get("sl7_rangeProx",[]);
 const yawTo=(o,p)=>Math.atan2(p.x-o.x,p.z-o.z);
 function aimOrigin(){ return mode==="course"&&course ? course.ball : {x:0,z:0}; }
-function aimPoint(){ if(mode==="course"&&course){ const h=HOLES[course.hole]; return course.aim||{x:h.pinX,z:h.L}; } return rangeAim; }
+function aimPoint(){ if(mode==="course"&&course){ const h=HOLES[course.hole]; return course.aim||course.auto||{x:h.pinX,z:h.L}; } return rangeAim; }
 function aimYaw(){ return yawTo(aimOrigin(),aimPoint()); }
 function aimDist(){ const o=aimOrigin(), p=aimPoint(); return Math.hypot(p.x-o.x,p.z-o.z); }
 function setAim(p,quiet){
   const o=aimOrigin(), d=Math.hypot(p.x-o.x,p.z-o.z); if(d<5) return;
-  if(mode==="course"&&course){ const h=HOLES[course.hole]; course.aim = Math.hypot(p.x-h.pinX,p.z-h.L)<1 ? null : {x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; saveCourse(); suggestClub(); }
+  if(mode==="course"&&course){ const h=HOLES[course.hole], auto=course.auto||{x:h.pinX,z:h.L};
+    course.aim = Math.hypot(p.x-auto.x,p.z-auto.z)<1 ? null : Math.hypot(p.x-h.pinX,p.z-h.L)<1 ? {x:h.pinX,z:h.L} : {x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; saveCourse(); suggestClub(); }
   else { rangeAim={x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; store.set("sl7_rangeAim",rangeAim); }
   if(has3D){ World.setAim(aimPoint()); if(!aimMode) World.address(o.x,o.z,aimYaw(),false); }
   renderAim(); if(!quiet) beep(1200,0.03);
 }
 function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="";
-  if(mode==="course"&&course){ side=course.aim?"":" · al hoyo"; }
+  if(mode==="course"&&course){ const h=HOLES[course.hole], q=aimPoint(); side=Math.hypot(q.x-h.pinX,q.z-h.L)<1?" · al hoyo":course.aim?"":" · ruta"; }
   $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`; $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
   $("aimBar").hidden=!has3D || mode==="data" || World.busy() || (mode==="course"&&course&&(course.holed||course.done)) || (S.input==="camera" && SL.Cam.on && !$("camVideo").hidden); void o; void p; }
 function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
   setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
 function toggleAimView(on){ aimMode=on; const o=aimOrigin(), p=aimPoint();
-  if(on){ const span=mode==="course"&&course ? Math.max(80,Math.hypot(HOLES[course.hole].pinX-o.x,HOLES[course.hole].L-o.z)*1.15) : 330;
-    const yaw=aimYaw(), c={x:o.x+Math.sin(yaw)*span*0.5, z:o.z+Math.cos(yaw)*span*0.5}; World.aimView(true,{x:c.x,z:c.z,span});
-    setHudMsg("Toca donde quieres que caiga la bola"); $("card").hidden=true; }
+  if(on){ const d=mode==="course"&&course ? Math.max(60,Math.hypot(HOLES[course.hole].pinX-o.x,HOLES[course.hole].L-o.z)) : 290, span=d*1.3;
+    const yaw=aimYaw(), c={x:o.x+Math.sin(yaw)*d*0.6, z:o.z+Math.cos(yaw)*d*0.6}; World.aimView(true,{x:c.x,z:c.z,span});
+    setHudMsg("Toca donde quieres que caiga la bola"); $("hudMsg").classList.add("hint"); $("card").hidden=true; $("holeTip").hidden=true; }
   else { World.aimView(false); World.address(o.x,o.z,aimYaw(),false); setHudMsg(null); }
   renderAim(); }
 let shotSeq=0;
@@ -133,59 +139,102 @@ function rangeShot(h){
 }
 
 // ================= Campo =================
-const HOLES=SL.HOLES;
 const newWind=()=>{ const s=Math.random()<0.25?0:1+Math.random()*4.5, a=Math.random()*Math.PI*2; return {s, x:Math.sin(a)*s, z:Math.cos(a)*s}; };
-const saveCourse=()=>store.set("sl4_course",course);
-function newRound(){ course={hole:0, ball:{x:0,z:0}, lie:"tee", strokes:0, scores:[], lines:[], wind:HOLES.map(newWind), holed:false, done:false};
-  saveCourse(); setupHole(true); renderScore(); }
-const holeYaw=()=>{ const h=HOLES[course.hole]; return Math.atan2(h.pinX-course.ball.x, h.L-course.ball.z); };
+const saveCourse=()=>{ if(course) rounds[courseId]=course; else delete rounds[courseId]; store.set("sl8_rounds",rounds); };
+const recKey=()=>"c_"+courseId, recOf=id=>records["c_"+id] ?? (id==="swinglab"?records.course:null) ?? null;
+function newRound(){ course={courseId, hole:0, ball:{x:0,z:0}, lie:"tee", strokes:0, scores:[], lines:[], wind:HOLES.map(newWind), holed:false, done:false};
+  saveCourse(); setupHole(true); renderScore(); renderCourses(); }
 const distToPin=()=>{ const h=HOLES[course.hole]; return Math.hypot(h.pinX-course.ball.x, h.L-course.ball.z); };
-let builtHole=-1;
+let builtHole="";
+const allowedClubs=lie=>SL.CLUB_ORDER.filter(c=>c==="driver"?lie==="tee":c==="wood3"?(lie==="tee"||lie==="fairway"):(lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
+// Objetivo automático: sigue la ruta del hoyo (zonas de aterrizaje reales) si el green no está a tu alcance
+function routeAim(){
+  const h=HOLES[course.hole], b=course.ball, pin={x:h.pinX,z:h.L}, D=(p,q)=>Math.hypot(p.x-q.x,p.z-q.z), dp=D(b,pin);
+  if(!h.route.length) return null;
+  const reach=Math.max(...allowedClubs(course.lie).map(c=>expectedTotal(c,course.lie)));
+  if(dp<=reach*1.05) return null;
+  const safe=p=>["fairway","rough","green"].includes(SL.lieAt(h,p.x,p.z));
+  const toward=(w,d)=>{ const k=d/D(b,w); return {x:+(b.x+(w.x-b.x)*k).toFixed(1), z:+(b.z+(w.z-b.z)*k).toFixed(1)}; };
+  if(dp<=reach*1.15 && safe(toward(pin,reach))) return null;            // casi llegas: ve al green
+  const ahead=h.route.filter(w=>D(w,pin)<dp-25 && D(b,w)>30); if(!ahead.length) return null;
+  const ok=ahead.filter(w=>D(b,w)<=reach*1.02), best=ok.length?ok.reduce((a,w)=>D(w,pin)<D(a,pin)?w:a):null;
+  const far=ahead.filter(w=>!ok.includes(w)).reduce((a,x)=>!a||D(b,x)<D(b,a)?x:a,null);
+  if(best && (D(b,best)>=reach*0.6 || !far)) return best;
+  if(far){ const p=toward(far,reach); if(safe(p)) return p; }
+  return best||far;
+}
+let tipTimer=0;
+function showTip(h){ const t=$("holeTip"); if(!h || !h.tip){ t.hidden=true; return; }
+  t.innerHTML=`<b>Hoyo ${h.num} · ${h.name} · par ${h.par} · ${fmtDist(h.len)}</b>${h.tip}`; t.hidden=false; clearTimeout(tipTimer); tipTimer=setTimeout(()=>{ t.hidden=true; },10000); }
 function setupHole(announce){
-  if(has3D){ if(builtHole!==course.hole || announce){ World.setHole(HOLES[course.hole]); builtHole=course.hole; }
+  if(!course.holed && !course.done) course.auto=routeAim();
+  const key=courseId+":"+course.hole;
+  if(has3D){ if(builtHole!==key || announce){ World.setHole(HOLES[course.hole]); builtHole=key; }
     World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),true); }
   renderAim();
   suggestClub(); renderHud(); drawMini(); camLayer(true);
   if(announce){ const h=HOLES[course.hole], w=course.wind[course.hole];
-    say(`Hoyo ${course.hole+1}, par ${h.par}, ${sayDist(h.L)}.`+(w.s>0.3?` Viento de ${Math.round(w.s)} metros por segundo.`:" Sin viento.")); }
+    say(`${CUR.name}, hoyo ${h.num}: ${h.name}. Par ${h.par}, ${sayDist(h.len)}.`+(w.s>0.3?` Viento de ${Math.round(w.s)} metros por segundo.`:" Sin viento.")+(h.tip?" "+h.tip.split(". ")[0]+".":""));
+    showTip(h); }
 }
 function expectedTotal(c,lie){ const mine=history.filter(h=>h.club===c && !h.sim), ms=mine.length?mine.slice(0,10).reduce((a,h)=>a+h.msRaw*factor(c,srcOf(h)),0)/Math.min(10,mine.length):CLUBS[c].def;
   const s=SL.simulateLocal(launch(c,ms,null,lie),[0,0],null); return Math.hypot(s.x,s.z); }
 function suggestClub(){
   if(mode!=="course" || !course || course.holed){ suggested=null; renderChips(); return; }
-  const R=aimDist(), allowed=SL.CLUB_ORDER.filter(c=>c==="driver"?course.lie==="tee":c==="wood3"?(course.lie==="tee"||course.lie==="fairway"):(course.lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
-  const opts=allowed.map(c=>({c,t:expectedTotal(c,course.lie)}));
-  suggested=(opts.find(o=>o.t>=R*0.92)||opts[opts.length-1]).c; if(suggested!==club) setClub(suggested,true); renderChips();
+  const R=aimDist(), opts=allowedClubs(course.lie).map(c=>({c,t:expectedTotal(c,course.lie)}));
+  const cost=o=>o.t<R?(R-o.t)*1.3:(o.t-R);   // el más cercano, castigando un poco quedarse corto
+  suggested=opts.reduce((a,o)=>cost(o)<cost(a)?o:a).c; if(suggested!==club) setClub(suggested,true); renderChips();
 }
 function puttsFor(d){ const r=Math.random(); if(d<1.5) return 1; if(d<3) return r<0.6?1:2; if(d<8) return r<0.15?1:(r<0.93?2:3); if(d<15) return r<0.05?1:(r<0.8?2:3); return r<0.6?2:3; }
 const RESULT={"-3":"¡Albatros!","-2":"¡Eagle!","-1":"Birdie","0":"Par","1":"Bogey","2":"Doble bogey"};
 function finishHole(text,voice){
-  const hole=HOLES[course.hole]; course.holed=true; course.scores[course.hole]=course.strokes;
-  if(course.hole===HOLES.length-1){ course.done=true; const tot=course.scores.reduce((a,b)=>a+b,0), par=HOLES.reduce((a,b)=>a+b.par,0), dd=tot-par;
-    if(records.course==null || tot<records.course){ records.course=tot; store.set("sl2_records",records); voice+=" ¡Nuevo récord!"; }
+  course.holed=true; course.scores[course.hole]=course.strokes; course.auto=null;
+  if(course.hole===HOLES.length-1){ course.done=true; const tot=course.scores.reduce((a,b)=>a+b,0), par=CUR.par, dd=tot-par, rec=recOf(courseId);
+    if(rec==null || tot<rec){ records[recKey()]=tot; store.set("sl2_records",records); voice+=" ¡Nuevo récord en "+CUR.name+"!"; }
     voice+=` Ronda terminada: ${tot} golpes, ${dd===0?"par del campo":dd>0?dd+" sobre par":(-dd)+" bajo par"}.`; }
-  setHudMsg(text); say(voice); saveCourse(); renderHud(); renderScore();
+  setHudMsg(text); say(voice); saveCourse(); renderHud(); renderScore(); renderCourses();
   const seq=shotSeq; if(!course.done) setTimeout(()=>{ if(seq===shotSeq && course.holed && !course.done) nextHole(); },6500);
 }
+const CHIP_MAX=40;
+function speedFor(c,dist,lie,h){ let lo=1, hi=CLUBS[c].def*1.2; for(let i=0;i<22;i++){ const m=(lo+hi)/2, s=SL.simulateLocal(launch(c,m,h,lie),[0,0],null); if(Math.hypot(s.x,s.z)<dist) lo=m; else hi=m; } return (lo+hi)/2; }
+const WATER_TXT={ocean:["¡Al mar!","Al mar."], burn:["¡Al arroyo!","Al arroyo."], pond:["¡Agua!","Al agua."]};
 function courseShot(h){
   if(course.done){ say("La ronda terminó. Empieza una nueva."); return; }
   if(course.holed) nextHole();
   if(aimMode) toggleAimView(false);
   const hole=HOLES[course.hole], yaw=aimYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole], tgt=aimPoint();
   const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw), windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
-  const dv=derive(h), o=launch(h.club,dv.ms,h,course.lie);
+  const toLocal=(x,z)=>[r[0]*(x-ox)+r[1]*(z-oz), f[0]*(x-ox)+f[1]*(z-oz)];
+  // Golpe corto asistido: cerca del green el sensor no mide bien un swing tan suave,
+  // así que la distancia se ajusta al objetivo (con un poco de error) y la cara y la ruta mandan la dirección
+  const dv=derive(h), ad=Math.hypot(tgt.x-ox,tgt.z-oz), chip=ad<=CHIP_MAX && course.lie!=="tee";
+  let ms=dv.ms; if(chip){ const need=speedFor(h.club,ad,course.lie,h), k=Math.max(0.5,Math.min(3,dv.ms/need)); ms=need*(1+0.12*Math.log2(k))*(1+gauss()*0.045); }
+  const o=launch(h.club,ms,h,course.lie);
   const sim=SL.simulateLocal(o, windLocal, (lx,lz)=>SL.lieAt(hole, ox+r[0]*lx+f[0]*lz, oz+r[1]*lx+f[1]*lz));
-  const pts=toWorld(sim.pts,ox,oz,yaw), fx=ox+r[0]*sim.x+f[0]*sim.z, fz=oz+r[1]*sim.x+f[1]*sim.z;
-  const endLie = sim.landG==="water"||sim.landG==="ob" ? sim.landG : SL.lieAt(hole,fx,fz);
-  const line=pts.filter(p=>p.t<=sim.landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
-  const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
+  let pts=toWorld(sim.pts,ox,oz,yaw), landT=sim.landT, fx=ox+r[0]*sim.x+f[0]*sim.z, fz=oz+r[1]*sim.x+f[1]*sim.z;
+  let wx=ox+r[0]*sim.landX+f[0]*sim.landZ, wz=oz+r[1]*sim.landX+f[1]*sim.landZ, card=sim, tree=false;
+  // choque con un árbol: la bola cae al pie de la copa
+  const th=SL.treeHit(hole,pts);
+  if(th){ const p=pts[th.i], q=pts[th.i-1], dl=Math.hypot(p.x-q.x,p.z-q.z)||1, bx=-(p.x-q.x)/dl*1.5, bz=-(p.z-q.z)/dl*1.5, tf=Math.sqrt(2*Math.max(0.05,p.y)/9.81), fall=[];
+    for(let k=1;k<=10;k++){ const u=k/10; fall.push({t:p.t+tf*u, x:p.x+bx*u, y:p.y*(1-u*u), z:p.z+bz*u}); }
+    pts=pts.slice(0,th.i+1).concat(fall); landT=fall[9].t; fx=wx=fall[9].x; fz=wz=fall[9].z; tree=true;
+    const lc=toLocal(fx,fz); card=Object.assign({},sim,{carry:Math.hypot(lc[0],lc[1]), x:lc[0], z:lc[1], apex:Math.min(sim.apex,Math.max(...pts.map(q=>q.y)))}); }
+  let endLie = !tree && (sim.landG==="water"||sim.landG==="ob") ? sim.landG : SL.lieAt(hole,fx,fz);
+  if(endLie==="water" && !SL.waterAt(hole,wx,wz)){ wx=fx; wz=fz; }
+  const line=pts.filter(p=>p.t<=landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
+  const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("holeTip").hidden=true; $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
   camLayer(false);
-  World.playShot({pts, landT:sim.landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
-    $("skip").hidden=true; showCard(sim, Math.hypot(fx-tgt.x,fz-tgt.z));
+  World.playShot({pts, landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
+    $("skip").hidden=true; showCard(card, Math.hypot(fx-tgt.x,fz-tgt.z));
     course.lines.push(line); World.setLines(course.lines);
     if(endLie==="water" || endLie==="ob"){
-      course.strokes+=2; const text=endLie==="water"?"¡Agua! +1 de penalidad":"Fuera de límites · +1";
-      setHudMsg(text); say((endLie==="water"?"Al agua.":"Fuera de límites.")+" Penalidad de un golpe. Juegas de nuevo desde el mismo sitio.");
+      course.strokes+=2; course.aim=null; let text, voice;
+      if(endLie==="water"){ const wa=SL.waterAt(hole,wx,wz)||{kind:"pond"}, tx=WATER_TXT[wa.kind]||WATER_TXT.pond, d=SL.dropFor(hole,{x:ox,z:oz},{x:wx,z:wz});
+        course.ball={x:+d.x.toFixed(1), z:+d.z.toFixed(1)}; const l=SL.lieAt(hole,d.x,d.z); course.lie=["water","ob","green"].includes(l)?"rough":l;
+        text=`${tx[0]} +1 de penalidad`; voice=`${tx[1]} Un golpe de penalidad. Dropeas ${hole.drop?"en la zona de dropeo":"cerca de donde entró"}.`; }
+      else { text="Fuera de límites · +1"; voice="Fuera de límites. Penalidad de un golpe. Juegas de nuevo desde el mismo sitio."; }
+      setHudMsg(text); say(voice);
+      if(course.strokes>=hole.par+5){ finishHole("Máximo de golpes · recoges la bola","Llegaste al máximo de golpes en este hoyo."); return; }
       saveCourse(); renderHud(); renderScore(); drawMini(); suggestClub();
       setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },2800); return;
     }
@@ -195,7 +244,7 @@ function courseShot(h){
     if(d<0.3){ const diff=course.strokes-hole.par, name=course.strokes===1?"¡Hoyo en uno!":(RESULT[diff]||(diff>0?`+${diff}`:`${diff}`));
       sfx.cup(); finishHole(`¡Embocada! ${name}`, `¡Embocada! ${name}.`); return; }
     if(endLie==="green"){
-      const n=puttsFor(d); setHudMsg(`En el green a ${fmtDist(d)}`); say(`En el green a ${sayDist(d)}.`);
+      const n=puttsFor(d); setHudMsg(`${chip?"Chip · ":""}En el green a ${fmtDist(d)}`); say(`En el green a ${sayDist(d)}.`);
       setTimeout(()=>{ if(seq!==shotSeq) return; setHudMsg(null); $("card").hidden=true;
         World.playPutts({from:{x:fx,z:fz}, pin:{x:hole.pinX,z:hole.L}, n, onPutt:()=>sfx.putt(), onHole:()=>sfx.cup(), onEnd:()=>{
           course.strokes+=n; const diff=course.strokes-hole.par, name=RESULT[diff]||(diff>0?`+${diff}`:`${diff}`);
@@ -203,8 +252,8 @@ function courseShot(h){
       return;
     }
     if(course.strokes>=hole.par+5){ course.strokes+=1; finishHole("Máximo de golpes · recoges la bola","Llegaste al máximo de golpes en este hoyo."); return; }
-    const lieName={fairway:"En la calle",rough:"En el rough",bunker:"En el bunker",tee:"En el tee"}[endLie]||"";
-    setHudMsg(`${lieName} · faltan ${fmtDist(d)}`); say(`${lieName}. Faltan ${sayDist(d)}.`);
+    const lieName={fairway:"En la calle",rough:"En el rough",bunker:"En el bunker",tee:"En el tee",road:"En el camino"}[endLie]||"";
+    setHudMsg(`${tree?"¡Árbol! ":chip?"Chip · ":""}${lieName} · faltan ${fmtDist(d)}`); say(`${tree?"Pegó en un árbol. ":""}${lieName}. Faltan ${sayDist(d)}.`);
     saveCourse(); renderHud(); renderScore(); suggestClub();
     setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },3200);
   }});
@@ -218,34 +267,55 @@ function renderHud(){
     R.hidden=!pr.length && !rangeMarks.length; renderAim(); return; }
   if(mode!=="course" || !course) return;
   const h=HOLES[course.hole], w=course.wind[course.hole], d=distToPin();
-  $("hudL").innerHTML=`<b>Hoyo ${course.hole+1} · Par ${h.par}</b>${h.name} · ${course.holed?"terminado":"faltan "+fmtDist(d)}`;
+  $("hudL").innerHTML=`<b>Hoyo ${h.num} · Par ${h.par}</b>${CUR.name} · ${course.holed?"terminado":"faltan "+fmtDist(d)}`;
   const tot=course.scores.reduce((a,b,i)=>a+(b||0)-(b?HOLES[i].par:0),0); R.hidden=false;
   R.innerHTML=`<b>${course.holed?course.strokes+" golpes":"Golpe "+(course.strokes+1)}</b>${w.s>0.3?"Viento "+w.s.toFixed(0)+" m/s "+windArrow(w):"Sin viento"}<br>Ronda: ${tot===0?"par":tot>0?"+"+tot:tot}`;
 }
 function windArrow(w){ if(!course) return ""; const rel=aimYaw()-Math.atan2(w.x,w.z), a=((rel/DEG)%360+360)%360;
   return ["↑","↗","→","↘","↓","↙","←","↖"][Math.round(a/45)%8]; }
 function renderScore(){
-  if(!course) return; const tbl=$("scoreTbl"), par=HOLES.reduce((a,b)=>a+b.par,0);
+  const tbl=$("scoreTbl"), par=CUR.par, rec=recOf(courseId);
+  if(!course){ tbl.innerHTML=""; $("nextHole").hidden=true; $("courseNote").textContent=CUR.desc; return; }
   const cells=HOLES.map((h,i)=>{ const s=course.scores[i], cls=s==null?"":s<h.par?"sc-under":s>h.par?"sc-over":"";
     return `<td class="${i===course.hole&&!course.done?"sc-cur":""} ${cls}">${s??(i===course.hole&&course.strokes?course.strokes:"")}</td>`; }).join("");
   const tot=course.scores.reduce((a,b)=>a+(b||0),0);
-  tbl.innerHTML=`<thead><tr><th>Hoyo</th>${HOLES.map((h,i)=>`<th>${i+1}</th>`).join("")}<th>Total</th></tr></thead><tbody><tr><td>Par</td>${HOLES.map(h=>`<td>${h.par}</td>`).join("")}<td>${par}</td></tr><tr><td>Golpes</td>${cells}<td><b>${tot||"—"}</b></td></tr></tbody>`;
+  tbl.innerHTML=`<thead><tr><th>Hoyo</th>${HOLES.map(h=>`<th>${h.num}</th>`).join("")}<th>Total</th></tr></thead><tbody><tr><td>Par</td>${HOLES.map(h=>`<td>${h.par}</td>`).join("")}<td>${par}</td></tr><tr><td>Golpes</td>${cells}<td><b>${tot||"—"}</b></td></tr></tbody>`;
   $("nextHole").hidden=!(course.holed && !course.done);
-  $("courseNote").textContent = course.done ? `Ronda terminada: ${tot} golpes (${tot-par===0?"par del campo":tot-par>0?"+"+(tot-par):tot-par}).`+(records.course?` Tu récord: ${records.course}.`:"")
-    : "Tres hoyos: par 4 con bunkers, par 3 con agua delante del green y par 5 con un lago a la izquierda. Los putts se juegan solos según la distancia. El viento cambia en cada hoyo."+(records.course?` Tu récord: ${records.course} golpes.`:"");
+  $("courseNote").textContent = course.done ? `Ronda terminada en ${CUR.name}: ${tot} golpes (${tot-par===0?"par del campo":tot-par>0?"+"+(tot-par):tot-par}).`+(rec?` Tu récord aquí: ${rec}.`:"")
+    : CUR.desc+" Los putts se juegan solos según la distancia y el viento cambia en cada hoyo."+(rec?` Tu récord aquí: ${rec} golpes.`:"");
+}
+// Selector de campo
+function renderCourses(){ const box=$("coursePick"); if(!box) return;
+  box.innerHTML=SL.COURSES.map(c=>{ const r=rounds[c.id], rec=recOf(c.id), playing=r && !r.done && (r.hole>0||r.strokes>0);
+    return `<button class="cp" data-c="${c.id}" aria-pressed="${c.id===courseId}"><span class="cp-tag">${c.style}</span><b>${c.name}</b><span>${c.place}</span>`+
+      `<small>Hoyos ${c.holes.map(h=>h.num).join(" · ")} · par ${c.par}${rec?` · récord ${rec}`:""}${playing?` · en juego (hoyo ${c.holes[r.hole].num})`:""}</small></button>`; }).join("");
+  box.querySelectorAll(".cp").forEach(b=>b.addEventListener("click",()=>selectCourse(b.dataset.c))); }
+function selectCourse(id){
+  if(World.busy()) return; const c=SL.courseById(id); if(c.id===courseId && course) return;
+  courseId=c.id; CUR=c; HOLES=c.holes; store.set("sl8_courseId",courseId); builtHole="";
+  course=validRound(rounds[courseId])?rounds[courseId]:null; $("card").hidden=true; setHudMsg(null); if(aimMode) aimMode=false;
+  if(mode!=="course"){ renderCourses(); renderScore(); return; }
+  if(!course) newRound(); else { setupHole(true); renderScore(); }
+  renderCourses(); window.scrollTo({top:0, behavior:"smooth"});
 }
 function drawMini(){
   const cv=$("mini"); if(cv.hidden || !course) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
   cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0);
-  const h=HOLES[course.hole], sc=(H-10)/(h.L+40), X=x=>W/2-x*sc, Y=z=>H-6-(z+5)*sc;   // igual que se ve desde el tee en 3D
+  const h=HOLES[course.hole], xs=h.cs.map(p=>p.x), zs=h.cs.map(p=>p.z), x0=Math.min(...xs)-16, x1=Math.max(...xs)+16, z0=-8, z1=Math.max(...zs)+16;
+  const sc=Math.min((W-6)/(x1-x0),(H-8)/(z1-z0)), cxm=(x0+x1)/2, X=x=>W/2-(x-cxm)*sc, Y=z=>H-4-(z-z0)*sc;   // igual que se ve desde el tee en 3D
+  const poly=pts=>{ c.beginPath(); pts.forEach((p,i)=>i?c.lineTo(X(p.x),Y(p.z)):c.moveTo(X(p.x),Y(p.z))); c.closePath(); };
+  const ell=(e,pad)=>{ c.beginPath(); c.ellipse(X(e.x),Y(e.z),Math.max(1.2,(e.rx+pad)*sc),Math.max(1.2,(e.rz+pad)*sc),e.rot,0,Math.PI*2); };
   c.fillStyle="#5a893a"; c.fillRect(0,0,W,H);
-  c.fillStyle="#86be5a"; c.beginPath(); let first=true;
-  for(let z=h.fwStart; z<=h.L; z+=6){ const x=SL.cxAt(h,z)-SL.hwAt(h,z); first?(c.moveTo(X(x),Y(z)),first=false):c.lineTo(X(x),Y(z)); }
-  for(let z=h.L; z>=h.fwStart; z-=6){ c.lineTo(X(SL.cxAt(h,z)+SL.hwAt(h,z)),Y(z)); } c.fill();
-  c.fillStyle="#2a6c96"; h.water.forEach(w=>c.fillRect(X(w.x0),Y(w.z1),(w.x1-w.x0)*sc,(w.z1-w.z0)*sc));
-  c.fillStyle="#e2cf9c"; h.bunkers.forEach(b=>{ c.beginPath(); c.arc(X(b.x),Y(b.z),Math.max(1.5,b.r*sc),0,Math.PI*2); c.fill(); });
-  c.fillStyle="#95d068"; c.beginPath(); c.arc(X(h.pinX),Y(h.L),Math.max(3,h.greenR*sc),0,Math.PI*2); c.fill();
+  c.fillStyle="#46702c"; h.ob.forEach(p=>{ poly(p); c.fill(); });
+  c.fillStyle="#86be5a"; c.beginPath(); h.fairSamples.forEach((f,i)=>{ if(i%3) return; const r=Math.max(1,f.w*sc); c.moveTo(X(f.x)+r,Y(f.z)); c.arc(X(f.x),Y(f.z),r,0,Math.PI*2); }); c.fill();
+  c.fillStyle="#2a6c96"; h.water.forEach(w=>{ poly(w.pts); c.fill(); });
+  c.fillStyle="#86be5a"; h.land.forEach(l=>{ poly(l.pts); c.fill(); });
+  c.strokeStyle="#9a9384"; c.lineWidth=1.2; h.roads.forEach(r=>{ c.beginPath(); r.pts.forEach((p,i)=>i?c.lineTo(X(p.x),Y(p.z)):c.moveTo(X(p.x),Y(p.z))); c.stroke(); });
+  c.fillStyle="#e2cf9c"; h.bunkers.forEach(b=>{ ell(b,0); c.fill(); });
+  c.fillStyle="#95d068"; ell(h.green,0); c.fill();
+  c.fillStyle="#d9d2c0"; h.buildings.forEach(b=>{ c.save(); c.translate(X(b.x),Y(b.z)); c.rotate(b.rot); c.fillRect(-b.w*sc/2,-b.d*sc/2,Math.max(1.5,b.w*sc),Math.max(1.5,b.d*sc)); c.restore(); });
   c.strokeStyle="rgba(255,255,255,.85)"; c.lineWidth=1; course.lines.forEach(l=>{ c.beginPath(); c.moveTo(X(l[0].x),Y(l[0].z)); c.lineTo(X(l[l.length-1].x),Y(l[l.length-1].z)); c.stroke(); });
+  if(!course.holed){ const a=aimPoint(); c.setLineDash([2,2]); c.strokeStyle="rgba(255,207,51,.9)"; c.beginPath(); c.moveTo(X(course.ball.x),Y(course.ball.z)); c.lineTo(X(a.x),Y(a.z)); c.stroke(); c.setLineDash([]); }
   c.fillStyle="#d8392b"; c.fillRect(X(h.pinX)-1,Y(h.L)-7,2,7);
   const b=course.ball; c.fillStyle="#fff"; c.strokeStyle="#000"; c.beginPath(); c.arc(X(b.x),Y(b.z),2.6,0,Math.PI*2); c.fill(); c.stroke();
 }
@@ -515,7 +585,7 @@ $("view").addEventListener("click",e=>{
 $("aimGo").addEventListener("click",e=>{ e.stopPropagation(); toggleAimView(!aimMode); });
 $("aimL").addEventListener("click",e=>{ e.stopPropagation(); nudgeAim(1.5); });
 $("aimR").addEventListener("click",e=>{ e.stopPropagation(); nudgeAim(-1.5); });
-$("aimPin").addEventListener("click",e=>{ e.stopPropagation(); if(course){ course.aim=null; saveCourse(); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),false); suggestClub(); renderAim(); } });
+$("aimPin").addEventListener("click",e=>{ e.stopPropagation(); if(course){ course.aim=null; course.auto=routeAim(); saveCourse(); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),false); suggestClub(); renderAim(); drawMini(); } });
 
 // ================= Modos y controles =================
 function setClub(c,silent){ club=c; store.set("sl2_club",club); $("clubLab").textContent=CLUBS[club].name; if(!silent) renderAll(); else renderChips(); }
@@ -524,10 +594,10 @@ function setMode(m){
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
   $("view").hidden=(m==="data"||!has3D) && !(S.input==="camera" && camState==="on"); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
-  $("card").hidden=true; setHudMsg(null); $("skip").hidden=true; if(aimMode){ aimMode=false; }
+  $("card").hidden=true; setHudMsg(null); $("holeTip").hidden=true; $("skip").hidden=true; if(aimMode){ aimMode=false; }
   if(has3D) World.setActive(m!=="data");
   if(m==="range") setupRange();
-  else if(m==="course"){ if(!course) newRound(); else { builtHole=-1; setupHole(false); } }
+  else if(m==="course"){ if(!course) newRound(); else { builtHole=""; setupHole(false); } renderCourses(); renderScore(); }
   else { drawTrace(); drawField(); }
   suggestClub(); renderAll();
 }
@@ -615,5 +685,5 @@ setClub(club,true); setMode(mode);
 document.querySelectorAll("#inputSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.i===S.input))); $("camHelp").hidden=S.input!=="camera"; if(S.input==="camera") setCamButton();
 setVerdict("Swing de ejemplo. Activa los sensores para medir el tuyo, o toca Golpe de prueba para ver la simulación.");
 if("serviceWorker" in navigator && location.protocol==="https:" && window.top===window) navigator.serviceWorker.register("sw.js").catch(()=>{});
-window.__swingLab={SL, testShot, World};
+window.__swingLab={SL, testShot, World, selectCourse, get course(){ return course; }, get courseId(){ return courseId; }};
 })();

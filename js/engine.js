@@ -223,8 +223,8 @@ SL.analyze = function(Sm, clubKey, opts={}){
 
 // ---------- física del vuelo ----------
 const AERO={cd0:0.24, cd1:0.2, a:1.8, b:1, clMax:0.3};
-SL.LIES={tee:{speed:1,spin:1}, fairway:{speed:1,spin:1}, rough:{speed:0.9,spin:0.6}, bunker:{speed:0.75,spin:0.5}, green:{speed:1,spin:1}};
-const GROUND={tee:{e:.25,mu:.25,k:1}, fairway:{e:.25,mu:.25,k:1}, rough:{e:.15,mu:.7,k:.6}, green:{e:.3,mu:.12,k:.95}, bunker:{e:.05,mu:2.5,k:.15}};
+SL.LIES={tee:{speed:1,spin:1}, fairway:{speed:1,spin:1}, rough:{speed:0.9,spin:0.6}, bunker:{speed:0.75,spin:0.5}, green:{speed:1,spin:1}, road:{speed:1,spin:0.85}};
+const GROUND={tee:{e:.25,mu:.25,k:1}, fairway:{e:.25,mu:.25,k:1}, rough:{e:.15,mu:.7,k:.6}, green:{e:.3,mu:.12,k:.95}, bunker:{e:.05,mu:2.5,k:.15}, road:{e:.4,mu:.16,k:1.08}};
 // Plano D: la salida la manda sobre todo la cara; la curva, la diferencia entre cara y ruta
 SL.launchFor = function(clubKey, ms, h, lie, hand){
   const c=SL.CLUBS[clubKey], L=SL.LIES[lie]||SL.LIES.fairway, hs=hand==="L"?-1:1; h=h||{};
@@ -328,35 +328,4 @@ SL.synthSwing = function(o={}){
   return out;
 };
 
-// ---------- campo ----------
-function rng(seed){ return ()=>{ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
-SL.rng = rng;
-SL.HOLES=[
-  {name:"El Guayacán", par:4, L:330, pinX:6,  fw:34, fwStart:40,  greenR:15, seed:1, bunkers:[{x:21,z:215,r:9},{x:-15,z:318,r:6}], water:[]},
-  {name:"La Laguna",   par:3, L:140, pinX:-4, fw:26, fwStart:112, greenR:14, seed:2, bunkers:[{x:16,z:150,r:6}], water:[{x0:-34,x1:30,z0:82,z1:110}]},
-  {name:"Los Samanes", par:5, L:470, pinX:-10,fw:32, fwStart:30,  greenR:16, seed:3, bunkers:[{x:-21,z:250,r:10},{x:13,z:458,r:7}], water:[{x0:22,x1:58,z0:280,z1:400}]}
-];
-SL.cxAt=(h,z)=>h.pinX*Math.max(0,Math.min(1,z/h.L));
-SL.hwAt=(h,z)=>{ let w=h.fw/2+2.2*Math.sin(z/41+h.seed)+1.4*Math.sin(z/17+h.seed*2.3); const e=z-h.fwStart; if(e<18) w*=Math.sqrt(Math.max(0,e/18)); return Math.max(0,w); };
-SL.HOLES.forEach((h,i)=>{ const R=rng(97+i*31); h.trees=[];
-  for(let z=-20; z<h.L+60; z+=11+R()*9){ for(const side of [-1,1]){ if(R()<0.8){
-    const cx=SL.cxAt(h,z), off=h.fw/2+20+R()*26, x=cx+side*off;
-    if(h.water.some(w=>x>w.x0-6 && x<w.x1+6 && z>w.z0-6 && z<w.z1+6)) continue;
-    if(Math.hypot(x-h.pinX,z-h.L)<h.greenR+12) continue;
-    h.trees.push({x, z:z+R()*6, s:0.8+R()*0.7, kind:R()<0.28?"cone":"round", hue:R()}); } } }
-  for(let k=0;k<70;k++){ const z=-30+R()*(h.L+100), side=R()<0.5?-1:1, x=SL.cxAt(h,z)+side*(h.fw/2+48+R()*45);
-    h.trees.push({x,z,s:0.9+R()*0.8, kind:R()<0.35?"cone":"round", hue:R()}); }
-});
-SL.lieAt=function(h,x,z){
-  if(Math.hypot(x-h.pinX, z-h.L)<=h.greenR) return "green";
-  for(const w of h.water) if(x>=w.x0 && x<=w.x1 && z>=w.z0 && z<=w.z1) return "water";
-  for(const b of h.bunkers) if(Math.hypot(x-b.x,z-b.z)<=b.r) return "bunker";
-  const off=Math.abs(x-SL.cxAt(h,z));
-  if(off>h.fw/2+45 || z<-8 || z>h.L+45) return "ob";
-  if(z<6 && Math.abs(x)<5) return "tee";
-  if(z>=h.fwStart && z<=h.L && off<=SL.hwAt(h,z)) return "fairway";
-  if(Math.hypot(x-h.pinX, z-h.L)<=h.greenR+3) return "fairway";
-  return "rough";
-};
-SL.RANGE_TARGETS=[{d:50,x:-8},{d:100,x:10},{d:150,x:-12},{d:200,x:6},{d:250,x:-4},{d:300,x:0}];
 })();

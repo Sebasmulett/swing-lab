@@ -61,6 +61,10 @@ h1 span{color:var(--accent)}
 .tag b{font:700 1.15rem var(--display);letter-spacing:.04em;display:block}
 .tag.r{text-align:right}
 .tag:empty{display:none}
+.holeTip{position:absolute;left:10px;right:10px;top:86px;background:rgba(8,24,18,.84);color:#fff;border-radius:12px;padding:9px 12px;font:400 .86rem/1.32 var(--body);text-align:left;pointer-events:none;animation:tipIn .35s ease-out}
+.holeTip b{display:block;font:700 1rem/1.2 var(--display);letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:2px}
+@keyframes tipIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.hudMsg.hint{top:auto;bottom:170px;font-size:.82rem;padding:6px 12px;max-width:80%}
 .hudMsg{position:absolute;left:50%;top:74px;transform:translateX(-50%);background:rgba(8,24,18,.78);color:#fff;border-radius:12px;padding:8px 14px;font:700 1.08rem/1.2 var(--display);letter-spacing:.05em;text-transform:uppercase;text-align:center;pointer-events:none;max-width:64%;white-space:normal}
 .card{position:absolute;left:10px;right:10px;bottom:10px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;background:rgba(8,24,18,.8);color:#eef4ef;border-radius:12px;padding:8px 10px;pointer-events:none}
 .card div{min-width:0}
@@ -155,6 +159,14 @@ canvas.plot{width:100%;display:block;border:1px solid var(--line);border-radius:
 .kpis span{display:block;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .kpis strong{font:700 1.3rem var(--display);font-variant-numeric:tabular-nums}
 .tablebox{overflow-x:auto}
+.coursePick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.cp{appearance:none;position:relative;text-align:left;display:flex;flex-direction:column;gap:2px;padding:10px 12px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:400 .85rem/1.25 var(--body);cursor:pointer;min-width:0}
+.cp b{font:700 1.05rem/1.15 var(--display);letter-spacing:.02em;padding-right:52px}
+.cp span{color:var(--muted);font-size:.78rem}
+.cp small{color:var(--muted);font-size:.72rem;margin-top:3px}
+.cp .cp-tag{position:absolute;top:8px;right:8px;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+.cp[aria-pressed="true"]{border:2px solid var(--accent);padding:9px 11px}
+.cp[aria-pressed="true"] .cp-tag{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.9rem}
 th{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:600;padding:6px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:7px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -196,6 +208,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <div class="tag r" id="hudR"></div>
     </div>
     <div class="hudMsg" id="hudMsg" hidden></div>
+    <div class="holeTip" id="holeTip" hidden></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
     <video id="camVideo" playsinline muted hidden></video>
@@ -206,7 +219,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button id="aimL" aria-label="Apuntar más a la izquierda">◀</button>
       <button class="go2" id="aimGo">🎯 Apuntar</button>
       <button id="aimR" aria-label="Apuntar más a la derecha">▶</button>
-      <button id="aimPin" hidden>Al hoyo</button>
+      <button id="aimPin" hidden title="Volver al objetivo automático">Auto</button>
       <span id="aimDist"></span>
     </div>
     <div class="card" id="card" hidden>
@@ -250,13 +263,16 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   </div>
 
   <section data-for="course" hidden>
+    <h2>Campo</h2>
+    <div class="coursePick" id="coursePick" role="group" aria-label="Elige el campo"></div>
     <h2>Tarjeta</h2>
     <div class="tablebox"><table class="score" id="scoreTbl"></table></div>
     <div class="row">
       <button class="ghost primary" id="nextHole" hidden>Siguiente hoyo</button>
       <button class="ghost" id="newRound">Nueva ronda</button>
     </div>
-    <p class="note" id="courseNote">Tres hoyos: un par 4 con bunkers, un par 3 con agua delante del green y un par 5 con un lago a la izquierda. Los putts se calculan solos según la distancia al hoyo. El viento cambia en cada hoyo.</p>
+    <p class="note" id="courseNote"></p>
+    <p class="note">Los hoyos están inspirados en los reales: misma distancia y forma, y las trampas (agua, bunkers, fuera de límites, árboles) en su lugar. El objetivo automático sigue la ruta del hoyo: si el green no está a tu alcance, apunta a la zona de aterrizaje. Puedes cambiarlo tocando el pasto; <b>Auto</b> lo devuelve. A menos de 40 m del objetivo el golpe es un <b>chip asistido</b>: un swing suave no se mide bien, así que la distancia se ajusta al objetivo y tu cara y tu ruta deciden la dirección.</p>
   </section>
 
   <section data-for="range">
@@ -385,9 +401,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.7"></script>
-<script src="js/world3d.js?v=0.7"></script>
-<script src="js/camera.js?v=0.7"></script>
-<script src="js/app.js?v=0.7"></script>
+<script src="js/engine.js?v=0.8"></script>
+<script src="js/courses.js?v=0.8"></script>
+<script src="js/world3d.js?v=0.8"></script>
+<script src="js/camera.js?v=0.8"></script>
+<script src="js/app.js?v=0.8"></script>
 </body>
 </html>
