@@ -61,6 +61,12 @@ h1 span{color:var(--accent)}
 .tag b{font:700 1.15rem var(--display);letter-spacing:.04em;display:block}
 .tag.r{text-align:right}
 .tag:empty{display:none}
+.celebrate{position:absolute;inset:0;z-index:6;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.celebrate b{font:800 clamp(2.2rem,11vw,4.2rem)/1 var(--display);letter-spacing:.06em;color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.45),0 0 2px rgba(0,0,0,.6);animation:celebIn .6s cubic-bezier(.2,1.6,.4,1) both}
+.celebrate.big b{color:var(--accent)}
+.celebrate i{position:absolute;top:-12px;width:8px;height:13px;border-radius:2px;animation:confetti linear both}
+@keyframes celebIn{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:none}}
+@keyframes confetti{to{top:110%;transform:translateX(30px) rotate(720deg)}}
 .holeTip{position:absolute;left:10px;right:10px;top:86px;background:rgba(8,24,18,.84);color:#fff;border-radius:12px;padding:9px 12px;font:400 .86rem/1.32 var(--body);text-align:left;pointer-events:none;animation:tipIn .35s ease-out}
 .holeTip b{display:block;font:700 1rem/1.2 var(--display);letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:2px}
 @keyframes tipIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
@@ -127,6 +133,7 @@ h1 span{color:var(--accent)}
   text-shadow:0 2px 12px rgba(0,0,0,.7);pointer-events:none}
 .camMsg.ready{color:#7dff9a}.camMsg.bad{color:#ffd0c8;font-size:clamp(1.1rem,4.6vw,1.5rem)}
 .replayBtn{position:absolute;right:10px;bottom:216px;z-index:3;appearance:none;border:0;border-radius:99px;padding:7px 12px;background:rgba(8,24,18,.8);color:#fff;font:600 .8rem var(--body);cursor:pointer}
+#aimInfo{white-space:normal;flex-basis:100%;background:rgba(8,24,18,.72);color:#eef4ef;border-radius:10px;padding:4px 9px;font:600 .74rem/1.3 var(--body);width:max-content;max-width:100%}
 .aimBar{position:absolute;left:10px;bottom:84px;z-index:3;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 100px)}
 .aimBar button{appearance:none;border:0;border-radius:99px;min-width:38px;height:38px;padding:0 12px;background:rgba(8,24,18,.8);color:#fff;font:700 .9rem var(--body);cursor:pointer}
 .aimBar button.go2{background:var(--accent);color:var(--accent-ink)}
@@ -184,7 +191,19 @@ canvas.plot{width:100%;display:block;border:1px solid var(--line);border-radius:
 .kpis span{display:block;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .kpis strong{font:700 1.3rem var(--display);font-variant-numeric:tabular-nums}
 .tablebox{overflow-x:auto}
+.selSeg{margin-top:10px;display:flex;width:100%}
+.selSeg button{flex:1;padding:9px 6px;font-size:.85rem}
+table.score td span{display:inline-flex;align-items:center;justify-content:center;min-width:1.7em;height:1.7em;line-height:1}
+.sc-birdie{border:1.5px solid currentColor;border-radius:50%}
+.sc-eagle{border:1.5px solid currentColor;border-radius:50%;box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px currentColor}
+.sc-bogey{border:1.5px solid currentColor}
+.sc-dbl{border:1.5px solid currentColor;box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px currentColor}
+table.score{font-variant-numeric:tabular-nums}
+table.score tbody + thead th{padding-top:14px}
 body.m-rank .board,body.m-rank .inputRow,body.m-rank #camHelp,body.m-rank .actions,body.m-rank #msg,body.m-rank #live,body.m-rank #clubRow{display:none}
+.rankScope{display:flex;width:100%;margin-bottom:8px}.rankScope button{flex:1}
+.rankFilters{display:flex;gap:8px;margin:0 0 8px}.rankFilters select{flex:1;min-width:0;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 .9rem var(--body)}
+.nameIn{width:100%;padding:12px 14px;border-radius:12px;border:2px solid var(--accent);background:var(--bg);color:var(--ink);font:600 1.1rem var(--body)}
 .players{display:flex;flex-wrap:wrap;gap:6px}
 .pchip{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:99px;padding:7px 12px;font:600 .9rem var(--body);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .pchip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
@@ -213,8 +232,8 @@ td{padding:7px 4px;border-bottom:1px solid var(--line);white-space:nowrap}
 td.best{color:var(--accent);font-weight:700}
 .score td,.score th{text-align:center}
 .score td:first-child,.score th:first-child{text-align:left}
-.sc-under{color:var(--good);font-weight:700}
-.sc-over{color:var(--bad);font-weight:700}
+.sc-under,.sc-birdie,.sc-eagle{color:var(--good);font-weight:700}
+.sc-over,.sc-bogey,.sc-dbl{color:var(--bad);font-weight:700}
 .sc-cur{background:color-mix(in srgb,var(--accent) 16%,transparent)}
 
 details{border-top:1px solid var(--line);padding-top:12px}
@@ -250,6 +269,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     </div>
     <div class="hudMsg" id="hudMsg" hidden></div>
     <div class="holeTip" id="holeTip" hidden></div>
+    <div class="celebrate" id="celebrate" hidden aria-live="polite"></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
     <div class="camBox pip" id="camBox" hidden>
@@ -266,6 +286,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button id="aimR" aria-label="Apuntar más a la derecha">▶</button>
       <button id="aimPin" hidden title="Volver al objetivo automático">Auto</button>
       <span id="aimDist"></span>
+      <span id="aimInfo" hidden></span>
     </div>
     <div class="card" id="card" hidden>
       <div><span>Carry</span><strong id="cCarry">—</strong></div>
@@ -320,8 +341,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   <section data-for="course" hidden>
     <h2>Campo</h2>
     <div class="coursePick" id="coursePick" role="group" aria-label="Elige el campo"></div>
+    <div class="seg selSeg" id="selSeg" role="group" aria-label="Recorrido" hidden></div>
     <h2>Tarjeta</h2>
     <div class="tablebox"><table class="score" id="scoreTbl"></table></div>
+    <p class="note" id="scoreTot"></p>
     <div class="row">
       <button class="ghost primary" id="nextHole" hidden>Siguiente hoyo</button>
       <button class="ghost" id="newRound">Nueva ronda</button>
@@ -336,21 +359,24 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   </section>
 
   <section data-for="rank" hidden>
-    <h2>Quién juega</h2>
-    <div class="players" id="players" role="group" aria-label="Jugadores"></div>
-    <div class="addP"><input id="newPlayer" maxlength="18" placeholder="Nombre de otro jugador" autocomplete="off"><button class="ghost" id="addPlayer">Agregar</button></div>
-    <p class="note">Cada jugador lleva su propia ronda en cada campo: pueden turnarse hoyo a hoyo en el mismo teléfono cambiando de jugador aquí.</p>
-    <h2>Récords</h2>
-    <div class="podium" id="podium"></div>
     <h2>Ranking</h2>
+    <div class="seg big rankScope" id="rankScope" role="group" aria-label="Dónde"></div>
     <div class="rankTabs" id="rankTabs" role="tablist"></div>
+    <div class="rankFilters" id="rankFilters"><select id="rankCourse" aria-label="Campo"></select><select id="rankSel" aria-label="Recorrido"></select></div>
     <div class="tablebox"><table class="rank"><thead id="rankHead"></thead><tbody id="rankBody"></tbody></table></div>
     <p class="note" id="rankNote"></p>
     <div class="row">
       <button class="ghost primary" id="rankShare">Compartir</button>
-      <button class="ghost" id="rankClear">Borrar ranking</button>
+      <button class="ghost" id="rankClear">Borrar los de este teléfono</button>
     </div>
-    <p class="note" id="rankClearConfirm" hidden>¿Borrar todo el ranking? <button class="ghost" id="rankClearYes">Sí, borrar</button> <button class="ghost" id="rankClearNo">Cancelar</button></p>
+    <p class="note" id="rankClearConfirm" hidden>¿Borrar los registros de este teléfono? (el ranking en línea no se borra) <button class="ghost" id="rankClearYes">Sí, borrar</button> <button class="ghost" id="rankClearNo">Cancelar</button></p>
+    <h2>Quién juega</h2>
+    <p class="note">Tu nombre en el ranking: <b id="meName"></b> <button class="ghost" id="renameBtn">Cambiar</button></p>
+    <div class="players" id="players" role="group" aria-label="Jugadores"></div>
+    <div class="addP"><input id="newPlayer" maxlength="18" placeholder="Nombre de otro jugador" autocomplete="off"><button class="ghost" id="addPlayer">Agregar</button></div>
+    <p class="note">Cada jugador lleva su propia ronda en cada campo: pueden turnarse hoyo a hoyo en el mismo teléfono cambiando de jugador aquí.</p>
+    <h2>Tus récords en este teléfono</h2>
+    <div class="podium" id="podium"></div>
   </section>
 
   <section data-for="data" hidden>
@@ -465,6 +491,15 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="intro" id="nameModal" hidden role="dialog" aria-modal="true" aria-labelledby="nameTitle">
+  <div class="box">
+    <h2 id="nameTitle">¿Cómo te llamas?</h2>
+    <p class="note">Tu nombre aparece en el ranking en línea, donde compites con los demás jugadores de Swing Lab. Solo cuentan los golpes reales, no los de prueba. Si tu nombre es común, agrega una inicial (ej. «Sebastián M.»).</p>
+    <input id="nameIn" maxlength="18" autocomplete="nickname" placeholder="Tu nombre o apodo" class="nameIn">
+    <p class="note alert" id="nameErr"></p>
+    <div class="row"><button class="ghost primary" id="nameOk">Guardar y jugar</button></div>
+  </div>
+</div>
 <div class="intro" id="camGuide" hidden role="dialog" aria-modal="true" aria-labelledby="guideTitle">
   <div class="box">
     <h2 id="guideTitle">Cómo colocar la cámara</h2>
@@ -509,10 +544,12 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.11"></script>
-<script src="js/courses.js?v=0.11"></script>
-<script src="js/world3d.js?v=0.11"></script>
-<script src="js/camera.js?v=0.11"></script>
-<script src="js/app.js?v=0.11"></script>
+<script src="js/engine.js?v=0.12"></script>
+<script src="js/courses.js?v=0.12"></script>
+<script src="js/world3d.js?v=0.12"></script>
+<script src="js/camera.js?v=0.12"></script>
+<script src="js/online-config.js?v=0.12"></script>
+<script src="js/online.js?v=0.12"></script>
+<script src="js/app.js?v=0.12"></script>
 </body>
 </html>

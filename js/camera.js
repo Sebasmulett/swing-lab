@@ -43,7 +43,7 @@ function localVel(T, P, tc, half, dims){
   if(idx.length<4) return null; const deg=idx.length>=6?3:2, xs=idx.map(i=>(T[i]-tc)/1000), ws=idx.map(i=>1-0.5*Math.abs(T[i]-tc)/half);
   const v=[]; for(let d=0;d<dims;d++){ const c=polyfit(xs, idx.map(i=>P[i][d]), ws, deg); if(!c) return null; v.push(c[1]); } return v;
 }
-const SINA_MIN=0.6;
+const SINA_MIN=0.6; let DTL_K=0.8; SL._dtlK=v=>{ DTL_K=v; };
 // la profundidad 3D es ruidosa: a pocos cuadros por segundo se atenúa la ruta medida (estimador con encogimiento)
 const PATH_SHRINK=fps=>fps>=50?0.8:fps>=35?0.7:0.6; let HALF_MIN=75, HALF_K=2.05; SL._camTune=(a,b)=>{ HALF_MIN=a; HALF_K=b; };
 // pico de una curva muestreada en 15 puntos: vértice de una parábola alrededor del máximo (no el máximo crudo, que se infla con el ruido)
@@ -90,28 +90,42 @@ SL.analyzePose=function(F, clubKey, opts={}){
   // ángulo de las manos alrededor de los hombros, con las manos sin suavizar para no correr la cima ni el impacto
   const v0=[Hn[a][0]-Sh[a][0], Hn[a][1]-Sh[a][1]];
   const ang=[]; let prev=0, sign=0;
+  // largo del brazo (hombros a manos) en el address, en 3D si hay coordenadas en metros
+  const adr=[]; for(let i=Math.max(0,a-12);i<=a;i++) adr.push(i);
+  const arm3=median(adr.map(i=>{ const m=F[i].m; if(!m||!m.ls||!m.lw||!m.rw) return NaN; const s=[(m.ls[0]+m.rs[0])/2,(m.ls[1]+m.rs[1])/2,(m.ls[2]+m.rs[2])/2], w=[(m.lw[0]+m.rw[0])/2,(m.lw[1]+m.rw[1])/2,(m.lw[2]+m.rw[2])/2];
+    return Math.hypot(s[0]-w[0],s[1]-w[1],s[2]-w[2]); }));
+  const armProj=median(adr.map(i=>dist(Hn[i],Sh[i])))*mPerPx;
+  const arm=clamp(isFinite(arm3)&&arm3>0.3 ? arm3 : armProj/0.87, 0.5, 0.78);
+  if(view==="behind"){
+    // Desde atrás el plano del swing se ve de canto: las manos suben y bajan por la línea manos-hombros.
+    // La altura sobre esa línea da el ángulo real de giro: p = r·(1 − cos θ)
+    const dv=[Sh[a][0]-Hn[a][0], Sh[a][1]-Hn[a][1]], dl=Math.hypot(...dv)||1, ux=dv[0]/dl, uy=dv[1]/dl;
+    for(let i=a;i<n;i++){ const p=((Hn[i][0]-Hn[a][0])*ux+(Hn[i][1]-Hn[a][1])*uy)*mPerPx; ang[i]=Math.acos(clamp(1-p/arm,-1,1)); }
+    sign=1;
+  } else {
   for(let i=a;i<n;i++){ const v=[Hn[i][0]-Sh[i][0], Hn[i][1]-Sh[i][1]]; let th=Math.atan2(v0[0]*v[1]-v0[1]*v[0], v0[0]*v[0]+v0[1]*v[1]);
     while(th-prev>Math.PI) th-=2*Math.PI; while(th-prev<-Math.PI) th+=2*Math.PI; prev=th; ang[i]=th; if(!sign && Math.abs(th)>20*DEG) sign=Math.sign(th); }
   if(!sign) return {error:"No vi la subida del swing. Ponte de frente a la cámara, a 2 o 3 metros.", code:"noback", obs:0};
-  for(let i=a;i<n;i++) ang[i]*=sign;
+  for(let i=a;i<n;i++) ang[i]*=sign; }
   let top=a; for(let i=a;i<=vmax;i++) if(ang[i]>ang[top]) top=i;
   { const mx=ang[top]; for(let i=top;i<=vmax;i++) if(ang[i]>=mx-1*DEG) top=i; }
   if(ang[top]<40*DEG) return {error:"El swing fue muy corto para medirlo. Sube más las manos.", code:"short", obs:0};
-  let imp=-1; for(let i=top+1;i<n && t[i]-t[top]<=1200;i++) if(ang[i]<=0){ imp=i; break; }
+  let imp=-1, tImp;
+  if(view==="behind"){
+    // desde atrás la subida y el final se ven del mismo lado: el impacto es cuando las manos vuelven más cerca del address
+    let m=-1; for(let i=top+1;i<n && t[i]-t[top]<=900;i++){ if(m<0 || ang[i]<ang[m]) m=i; if(m>=0 && ang[i]>ang[m]+15*DEG) break; }
+    if(m>0 && ang[m]<0.4*ang[top]){ imp=m; const y0=ang[m-1], y1=ang[m], y2=ang[Math.min(n-1,m+1)], den=y0-2*y1+y2;
+      const off=den>1e-6?clamp(0.5*(y0-y2)/den,-0.5,0.5):0; tImp=t[m]+off*((t[Math.min(n-1,m+1)]-t[m-1])/2); }
+  } else { for(let i=top+1;i<n && t[i]-t[top]<=1200;i++) if(ang[i]<=0){ imp=i; break; }
+    if(imp>0){ const fr=ang[imp-1]/((ang[imp-1]-ang[imp])||1); tImp=t[imp-1]+(t[imp]-t[imp-1])*fr; } }
   if(imp<0) return {error:"No vi el impacto: termina el swing dentro de la imagen.", code:"noimp", obs:0};
-  const fr=ang[imp-1]/((ang[imp-1]-ang[imp])||1), tImp=t[imp-1]+(t[imp]-t[imp-1])*fr;
-  let fin=imp; for(let i=imp;i<n && t[i]-tImp<=2200;i++) if(ang[i]<ang[fin]) fin=i;
+  let fin=imp; for(let i=imp;i<n && t[i]-tImp<=2200;i++) if(view==="behind"?ang[i]>ang[fin]:ang[i]<ang[fin]) fin=i;
   let st=a; while(st<top && ang[st]<2*DEG) st++;
   const tSt= st>a ? t[st-1]+(t[st]-t[st-1])*((2*DEG-ang[st-1])/((ang[st]-ang[st-1])||1)) : t[st];
   const tTop=t[top], back=tTop-tSt, down=tImp-tTop, okT=back>200 && back<3500 && down>80 && down<900;
   const fps=(n-1)/((t[n-1]-t[0])/1000);
 
   // ---- geometría personal: largo del brazo e inclinación del plano (de los cuadros quietos del address) ----
-  const adr=[]; for(let i=Math.max(0,a-12);i<=a;i++) adr.push(i);
-  const arm3=median(adr.map(i=>{ const m=F[i].m; if(!m||!m.ls||!m.lw||!m.rw) return NaN; const s=[(m.ls[0]+m.rs[0])/2,(m.ls[1]+m.rs[1])/2,(m.ls[2]+m.rs[2])/2], w=[(m.lw[0]+m.rw[0])/2,(m.lw[1]+m.rw[1])/2,(m.lw[2]+m.rw[2])/2];
-    return Math.hypot(s[0]-w[0],s[1]-w[1],s[2]-w[2]); }));
-  const armProj=median(adr.map(i=>dist(Hn[i],Sh[i])))*mPerPx;
-  const arm=clamp(isFinite(arm3)&&arm3>0.3 ? arm3 : armProj/0.87, 0.5, 0.78);
   const sinA=view==="front" ? clamp(armProj/arm, SINA_MIN, 1) : 1;
 
   // ---- velocidad de las manos ----
@@ -130,7 +144,13 @@ SL.analyzePose=function(F, clubKey, opts={}){
   // fusión: de frente manda la imagen; desde atrás, el 3D y el modelo (el movimiento va hacia la cámara)
   let handMax, cands;
   if(view==="front"){ cands=[[e2dMax,1]]; if(e3d && Math.abs(e3d/e2dMax-1)<0.3) cands.push([e3d,0.25]); }
-  else { cands=[]; if(e3d) cands.push([e3d,1]); if(eModel) cands.push([eModel*1.04,0.8]); if(!cands.length) cands.push([e2dMax,1]); }
+  else {
+    // desde atrás: la altura de las manos sobre la línea del plano da el ángulo real de giro (p = r·(1 − cos θ));
+    // con su ritmo en la bajada se obtiene la velocidad angular en el impacto
+    let eDTL=null; { const T0=ang[top], qs=[];
+      for(let i=top+1;i<imp;i++){ const u=(t[i]-tTop)/down, y=1-ang[i]/T0; if(u>0.25 && u<0.95 && y>0.03 && y<0.97) qs.push(Math.log(y)/Math.log(u)); }
+      const q=median(qs); if(isFinite(q) && q>1 && q<8 && T0>0.6) eDTL=arm*T0*q/(down/1000)*DTL_K; }
+    cands=[]; if(eDTL) cands.push([eDTL,1]); if(e3d && (!eDTL || Math.abs(e3d/eDTL-1)<0.35)) cands.push([e3d,0.6]); if(!cands.length && eModel) cands.push([eModel*1.04,0.8]); if(!cands.length) cands.push([e2dMax*1.6,1]); }
   handMax=cands.reduce((s,c)=>s+c[0]*c[1],0)/cands.reduce((s,c)=>s+c[1],0);
   if(!(handMax>0.8)) return {error:"No pude medir la velocidad de las manos. Revisa que se vean bien en toda la bajada.", code:"nospeed", obs:0};
   const ratio=SL.camRatio(clubKey, arm, grip);
@@ -173,7 +193,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
   const vis=median(F.slice(top,imp+1).map(f=>Math.min(f.v.lw??1,f.v.rw??1)));
   pen(vis>=0.8?1:vis>=0.6?0.85:0.65, "las manos se ven poco en la bajada (luz o ropa del mismo color del fondo)");
   if(eModel && e2dImp){ const dis=Math.abs(eModel/e2dImp-1); pen(dis<0.15?1:dis<0.3?0.85:0.7, "el movimiento fue irregular para la cámara"); }
-  if(view!=="front") pen(0.72, "desde atrás la velocidad es menos precisa: para medirla pon la cámara de frente");
+  if(view!=="front") pen(0.88, "desde atrás la velocidad es un poco menos precisa que de frente");
   reasons.sort((x,y)=>x[0]-y[0]);
   const camQ={score:Math.round(q*100)/100, level:q>=0.75?"alta":q>=0.5?"media":"baja", why:reasons.map(r=>r[1])};
 
@@ -186,8 +206,19 @@ SL.analyzePose=function(F, clubKey, opts={}){
     const shTurn=Math.acos(clamp(swT/(sw0||1),0,1))/DEG, hipTurn=Math.acos(clamp(hwT/(hw0||1),0,1))/DEG;
     const headY=(F[imp].p.nose[1]-F[a].p.nose[1])*mPerPx*100;
     posture={head:Math.round(head), headY:Math.round(headY), sway:Math.round(sway), slide:Math.round(slide), shTurn:Math.round(shTurn), hipTurn:Math.round(hipTurn)};
+  } else {
+    // Desde atrás: ángulo de la columna, si te levantas o adelantas la cadera hacia la bola (extensión temprana),
+    // la cabeza y dónde quedan las manos arriba respecto a la línea manos-hombros del address (el plano)
+    const out=Math.sign(Hn[a][0]-Hp[a][0])||1;
+    const spineAt=i=>Math.atan2((Sh[i][0]-Hp[i][0])*out, Hp[i][1]-Sh[i][1])/DEG;   // >0: inclinado hacia la bola
+    const spineA=spineAt(a), spineI=spineAt(imp);
+    const hipThrust=(Hp[imp][0]-Hp[a][0])*out*mPerPx*100, headDrop=(F[imp].p.nose[1]-F[a].p.nose[1])*mPerPx*100, headIn=(F[imp].p.nose[0]-F[a].p.nose[0])*out*mPerPx*100;
+    const L0=Hn[a], L1=Sh[a], dl=[L1[0]-L0[0],L1[1]-L0[1]], ln=Math.hypot(...dl)||1;
+    const planeTop=((Hn[top][0]-L0[0])*dl[1]-(Hn[top][1]-L0[1])*dl[0])/ln*out*mPerPx*100;   // >0: manos del lado de la bola (subida vertical)
+    posture={dtl:true, spine:Math.round(spineA), spineChg:Math.round(spineI-spineA), hipThrust:Math.round(hipThrust), headDrop:Math.round(headDrop), headIn:Math.round(headIn), planeTop:Math.round(planeTop),
+      lines:{hand:L0, sh:L1, hip:Hp[a]}};
   }
-  const arcTop=Math.round(ang[top]/DEG), arcFin=Math.round(-ang[fin]/DEG);
+  const arcTop=Math.round(ang[top]/DEG), arcFin=Math.round((view==="behind"?ang[fin]:-ang[fin])/DEG);
   const i0=Math.max(a,st-4), i1=Math.min(n-1,fin+4);
   return {
     id:Date.now()+Math.random(), at:Date.now(), club:clubKey, source:"camera", mode:"camera", grip, view,
@@ -253,6 +284,7 @@ async function loadModel(kind){
   if(landmarker) try{ landmarker.close(); }catch(_){}
   landmarker=lm; modelKind=kind; Cam.model=kind; detTimes=[];
 }
+Cam.setView=v=>{ opts.view=v; Cam.addrLines=null; };
 Cam.supported=()=>!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 Cam.setMock=fn=>{ mock=fn; };   // pruebas: función (t)=>cuadro
 Cam.start=async function(o){
@@ -325,11 +357,12 @@ function setupHint(f){
   if(cx<0.22 || cx>0.78) return "Muévete al centro de la imagen";
   if(opts.view!=="behind" && r<0.42) return "Ponte de frente a la cámara (el objetivo a un lado)";
   if(opts.view==="behind" && r>0.62) return "Para la vista desde atrás, la cámara va detrás de ti, mirando al objetivo";
+  if(opts.view==="behind"){ const hy=mid(p.lw,p.rw)[1]/H; if(hy<0.35) return "Baja el teléfono: a la altura de tus manos"; if(hy>0.85) return "Sube el teléfono: a la altura de tus manos"; }
   return null; }
 // máquina de estados: buscar cuerpo → quieto en address → swing → final
 // Solo se dispara desde "listo" (quieto en address): caminar o acomodarse ya no se confunde con un swing.
 const coreVisible=f=>["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
-let readyHip=null;
+let readyHip=null, viewVotes=0;
 function step(f){
   const now=f.t;
   if(Cam.paused){ trail=[]; return; }
@@ -349,6 +382,12 @@ function step(f){
     // si caminas (la cadera se va del sitio) vuelve a esperar el address
     if(st==="ready" && readyHip && dist(hip,readyHip)>0.4*torso && v<2.2){ st="seek"; stillSince=null; readyHip=null; }
     if(st==="ready" && v>2.2){ st="capture"; capStart=now; quietSince=null; status("Leyendo swing…","wait"); }
+    // ¿de frente o de perfil? si no coincide con lo elegido, avisa a la app (cambia sola de vista)
+    if(v<0.5){ const r=dist(f.p.ls,f.p.rs)/(dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1), guess=r<0.38?"behind":r>0.6?"front":null;
+      viewVotes=guess && guess!==(opts.view||"front") ? viewVotes+1 : 0;
+      if(viewVotes>=45){ viewVotes=0; cb.onView && cb.onView(guess); } }
+    if(st==="ready" && (opts.view==="behind")) Cam.addrLines={hand:mid(f.p.lw,f.p.rw), sh:mid(f.p.ls,f.p.rs), hip:mid(f.p.lh,f.p.rh)};
+    if(st==="seek") Cam.addrLines=null;
   } else if(st==="capture"){
     trail.push({t:now, p:hand}); while(trail.length && now-trail[0].t>1600) trail.shift();
     if(v<0.35){ if(quietSince==null) quietSince=now; } else quietSince=null;
@@ -372,8 +411,14 @@ function draw(f){
   const {w,h,d}=fit(); ctx.setTransform(d,0,0,d,0,0); ctx.clearRect(0,0,w,h);
   if(f.none || !f.p) return;
   const M=skeleton(f,w,h,"rgba(255,210,63,0.95)",4);
+  if(opts.view==="behind" && Cam.addrLines) planeLines(Cam.addrLines,M,w,h);
   if(trail.length>1){ ctx.strokeStyle="rgba(255,255,255,0.8)"; ctx.lineWidth=3; ctx.beginPath(); trail.forEach((q,i)=>{ const P=M(q.p); i?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke(); }
 }
+// líneas guía de la vista desde atrás: la columna (cadera-hombros) y el plano (manos-hombros), alargadas
+function planeLines(L,M,w,h){ const ext=(a,b,k)=>[a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k];
+  const seg=(a,b,col,dash)=>{ const A=M(a), B=M(b); ctx.save(); ctx.strokeStyle=col; ctx.lineWidth=2.5; ctx.setLineDash(dash||[]); ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); ctx.restore(); };
+  seg(ext(L.hand,L.sh,-0.6), ext(L.hand,L.sh,1.9), "rgba(120,220,255,0.9)", [8,6]);   // plano
+  seg(ext(L.hip,L.sh,-0.2), ext(L.hip,L.sh,1.5), "rgba(255,120,120,0.9)", [4,5]); }  // columna
 // repetición en cámara lenta del último swing (solo el esqueleto)
 Cam.replay=function(res, speed=0.3, onEnd){
   canvas=document.getElementById("camCanvas"); ctx=canvas.getContext("2d");
@@ -389,6 +434,7 @@ Cam.replay=function(res, speed=0.3, onEnd){
     ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=2; ctx.beginPath(); hands.forEach((p,j)=>{ const P=M(p); j?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke();
     ctx.strokeStyle="#ffd23f"; ctx.lineWidth=3.5; ctx.beginPath(); hands.slice(0,i+1).forEach((p,j)=>{ const P=M(p); j?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke();
     skeleton(F[i],w,h,"#ffffff",4,M);
+    if(res.posture && res.posture.lines) planeLines(res.posture.lines,M,w,h);
     const rel=k=>Math.max(0,Math.min(F.length-1,k-(mk.a-8>0?mk.a-8:0)));
     for(const [k,lab] of [[mk.top,"arriba"],[mk.imp,"impacto"]]){ const P=M(hands[rel(k)]); ctx.fillStyle="#ffd23f"; ctx.beginPath(); ctx.arc(P[0],P[1],5,0,Math.PI*2); ctx.fill();
       ctx.font="600 12px Figtree, system-ui, sans-serif"; ctx.fillText(lab,P[0]+8,P[1]-6); }

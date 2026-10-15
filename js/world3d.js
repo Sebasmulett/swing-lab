@@ -114,6 +114,9 @@ function paintHole(ctx,B,sx,sz,W,P,shadowsOf){
   ctx.save(); ellPath(ctx,G); ctx.clip(); stripes(ctx,B,2.5,"#95d068","#8ac55f");
   const GR=Math.max(G.rx,G.rz), g=ctx.createRadialGradient(G.x-3,G.z-3,1,G.x,G.z,GR); g.addColorStop(0,"rgba(255,255,220,0.10)"); g.addColorStop(1,"rgba(0,40,0,0.10)"); ctx.fillStyle=g; ctx.fillRect(G.x-GR,G.z-GR,GR*2,GR*2); ctx.restore();
   ctx.fillStyle="#141c0e"; circlePath(ctx,h.pinX,h.L,0.13); ctx.fill();
+  // placas de distancia en la calle (100 rojo, 150 blanco, 200 azul) medidas al centro del green
+  for(const [dd,col] of [[100,"#d23c2c"],[150,"#f4f4f4"],[200,"#2f63c8"]]){ const s=h.cs[h.cs.length-1].s-dd; if(s<40) continue; const c=h.cs[Math.max(0,Math.min(h.cs.length-1,Math.round(s/4)))];
+    ctx.fillStyle="rgba(0,0,0,0.25)"; circlePath(ctx,c.x,c.z,0.75); ctx.fill(); ctx.fillStyle=col; circlePath(ctx,c.x,c.z,0.6); ctx.fill(); }
   // sombras de edificios
   ctx.fillStyle="rgba(18,30,10,0.32)"; for(const b of h.buildings){ ctx.save(); ctx.translate(b.x+b.h*0.25,b.z+b.h*0.35); ctx.rotate(b.rot); ctx.fillRect(-b.w/2,-b.d/2,b.w,b.d); ctx.restore(); }
   shadowsOf(def.trees);
@@ -250,14 +253,21 @@ function building(b){
   g.position.set(b.x,0,b.z); g.rotation.y=-b.rot; return g; }
 function shapeGeo(pts,y){ const sh=new T.Shape(pts.map(p=>new T.Vector2(p.x,-p.z))), g=new T.ShapeGeometry(sh); g.rotateX(-Math.PI/2); g.translate(0,y,0); return g; }
 function groundUV(g,B){ const pos=g.attributes.position, uv=g.attributes.uv; for(let i=0;i<pos.count;i++){ uv.setXY(i,(pos.getX(i)-B.x0)/(B.x1-B.x0), 1-(pos.getZ(i)-B.z0)/(B.z1-B.z0)); } uv.needsUpdate=true; return g; }
+// textura de olas suaves para el brillo del agua (se desplaza con el tiempo)
+function makeWaterNormal(){ const N=128, c=document.createElement("canvas"); c.width=c.height=N; const x=c.getContext("2d"), im=x.createImageData(N,N);
+  for(let j=0;j<N;j++) for(let i=0;i<N;i++){ const a=Math.sin((i/N)*Math.PI*2*3+Math.sin(j/N*Math.PI*2)*1.5), b=Math.sin((j/N)*Math.PI*2*4+Math.cos(i/N*Math.PI*2*2)), o=(j*N+i)*4;
+    im.data[o]=128+a*60; im.data[o+1]=128+b*60; im.data[o+2]=230; im.data[o+3]=255; }
+  x.putImageData(im,0,0); const t=new T.CanvasTexture(c); t.wrapS=t.wrapT=T.RepeatWrapping; t.__keep=true; c.__keep=true; return t; }
 W3.setHole=function(h){
   if(!W3.ok) return; def={kind:"hole", h, trees:h.trees}; clearWorld();
   const B=mapBounds(); def.B=B; const tex=paint(B); world.add(groundPlane(B,tex,0,-1));
   world.add(trees(h.trees));
   const inB=(p,m)=>p.x>B.x0-m && p.x<B.x1+m && p.z>B.z0-m && p.z<B.z1+m;
   // agua (mar, lagos y arroyos)
-  for(const w of h.water){ const wm=new T.Mesh(shapeGeo(w.pts,0.03),
-      new T.MeshPhongMaterial({color:w.kind==="ocean"?(w.beach?0x2a8aa8:0x1f5f86):0x2a6c96, specular:0xcfe8ff, shininess:w.kind==="ocean"?90:120, transparent:true, opacity:0.93, polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6}));
+  waterMats=[]; if(!waterNormal) waterNormal=makeWaterNormal();
+  for(const w of h.water){ const geo=shapeGeo(w.pts,0.03); { const pos=geo.attributes.position, uv=geo.attributes.uv; for(let i=0;i<pos.count;i++) uv.setXY(i,pos.getX(i)/14,pos.getZ(i)/14); uv.needsUpdate=true; }
+    const mat=new T.MeshPhongMaterial({color:w.kind==="ocean"?(w.beach?0x2a8aa8:0x1f5f86):0x2a6c96, specular:0xe8f4ff, shininess:w.kind==="ocean"?70:90, transparent:true, opacity:0.94, normalMap:waterNormal, normalScale:new T.Vector2(0.35,0.35), polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6});
+    waterMats.push(mat); const wm=new T.Mesh(geo,mat);
     world.add(wm);
     if(w.kind==="ocean" && w.rocks){ // rocas a lo largo de la costa
       const sh=w.pts.slice(0,w.shore), Rn=SL.rng(h.seed*13), list=[];
@@ -309,7 +319,7 @@ function paintDetail(x,z){
 
 // ---------------- cámara y animación ----------------
 W3.address=function(x,z,yaw,immediate){
-  if(!W3.ok) return; S.anim=null; S.putt=null; S.trail=[]; S.address={x,z,yaw};
+  if(!W3.ok) return; S.anim=null; S.putt=null; S.fly=null; S.trail=[]; S.address={x,z,yaw};
   S.f={x:Math.sin(yaw),z:Math.cos(yaw)}; S.r={x:Math.cos(yaw),z:-Math.sin(yaw)};
   ball.position.set(x,BALL_R,z); ball.visible=true;
   const pos=new T.Vector3(x-S.f.x*5.2, 1.7, z-S.f.z*5.2), look=new T.Vector3(x+S.f.x*90, 1.5, z+S.f.z*90);
@@ -334,7 +344,7 @@ W3.playShot=function(o){ // o: {pts:[{t,x,y,z}] mundo, landT, onLand, onEnd}
   if(!W3.ok){ o.onLand&&o.onLand(); o.onEnd&&o.onEnd(); return; }
   const last=o.pts[o.pts.length-1], land=o.pts.find(p=>p.t>=o.landT)||last;
   S.anim={pts:o.pts, landT:o.landT, dur:last.t, t0:clock.elapsedTime, onLand:o.onLand, onEnd:o.onEnd, landed:false, land, last, green:false, i:0};
-  S.trail=[];
+  S.trail=[]; S.fly=null;
 };
 W3.playPutts=function(o){ // o: {from:{x,z}, pin:{x,z}, n, onPutt, onHole, onEnd}
   if(!W3.ok){ o.onHole&&o.onHole(); o.onEnd&&o.onEnd(); return; }
@@ -348,9 +358,21 @@ W3.playPutts=function(o){ // o: {from:{x,z}, pin:{x,z}, n, onPutt, onHole, onEnd
   }
   S.anim=null; S.trail=[]; S.putt={segs, k:0, t0:clock.elapsedTime+0.6, pin:o.pin, onPutt:o.onPutt, onHole:o.onHole, onEnd:o.onEnd, started:false, done:false};
 };
-W3.skip=function(){ if(S.anim) S.anim.skip=true; if(S.putt) S.putt.skip=true; };
+W3.skip=function(){ if(S.anim) S.anim.skip=true; if(S.putt) S.putt.skip=true; if(S.fly) S.fly.skip=true; };
+// Vuelo sobre el hoyo al empezar: de la salida al green, como en la TV
+W3.flyover=function(h,onEnd){ if(!W3.ok){ onEnd&&onEnd(); return; } S.fly={h, t0:clock.elapsedTime, dur:Math.min(6.5,3.2+h.len/170), onEnd, skip:false}; };
+W3.flying=()=>!!S.fly;
 W3.busy=()=>!!(S.anim||S.putt);
-let aimRing=null, aimDisc=null, aimLine=null, hills=[];
+let aimRing=null, aimDisc=null, aimLine=null, hills=[], hillMatRef=null, mtns=null, waterMats=[], waterNormal=null;
+// Paisaje según el campo: montañas (Bogotá), mar abierto (Caribe) o colinas suaves
+W3.setScenery=function(kind){ if(!W3.ok) return;
+  const andes=kind==="andes";
+  hills.forEach(hm=>{ const u=hm.userData; if(!u.s) return; hm.scale.copy(u.s); hm.position.copy(u.p);
+    if(andes){ hm.scale.y=u.s.y*1.8+50; hm.scale.x=u.s.x*1.3; hm.scale.z=u.s.z*1.3; hm.position.y=-20; } });
+  if(hillMatRef) hillMatRef.color.set(andes?0x46683f:kind==="caribe"?0x5f9a50:0x56824a);
+  if(mtns) mtns.visible=andes;
+  scene.fog.color.set(andes?0xc3d3dc:kind==="caribe"?0xd2e8f0:0xc8dde8); scene.fog.far=andes?3400:2300;
+};
 
 
 function update(dt){
@@ -380,6 +402,14 @@ function update(dt){
       if(u>=1){ if(s.holed && !P.holed){ P.holed=true; P.onHole&&P.onHole(); } P.k++; P.started=false; P.cut=false; P.t0=now+(P.skip?0:0.7); }
     } else if(!P.done){ P.done=true; const cb=P.onEnd; S.putt=null; cb&&cb(); }
   }
+  // vuelo de presentación del hoyo
+  if(S.fly && !S.anim && !S.putt){ const F=S.fly, h=F.h, cs=h.cs, u=F.skip?1:Math.min(1,(now-F.t0)/F.dur), e=u<0.5?2*u*u:1-Math.pow(-2*u+2,2)/2;
+    const L=cs[cs.length-1].s, at=s=>{ s=Math.max(0,Math.min(L,s)); let i=Math.min(cs.length-1,Math.round(s/4)); return cs[i]; };
+    const p=at(e*L-30), q=at(Math.min(L,e*L+120)), hgt=38-18*e;
+    C.tPos=new T.Vector3(p.x, hgt, p.z); C.tLook=new T.Vector3(e>0.8?h.pinX:q.x, 0, e>0.8?h.L:q.z); C.rate=3; C.lookRate=2.5;
+    if(!F.started){ F.started=true; C.pos.copy(C.tPos); C.look.copy(C.tLook); }
+    if(u>=1){ const cb=F.onEnd; S.fly=null; cb&&cb(); } }
+  if(waterMats.length && waterNormal){ waterNormal.offset.x=(now*0.012)%1; waterNormal.offset.y=(now*0.007)%1; }
   // cámara suave
   if(C.tPos){ C.pos.lerp(C.tPos,1-Math.exp(-dt*C.rate)); }
   if(C.tLook){ C.look.lerp(C.tLook,1-Math.exp(-dt*C.lookRate)); }
@@ -444,7 +474,13 @@ W3.init=function(cv){
   // colinas lejanas
   const hillMat=new T.MeshLambertMaterial({color:0x56824a});
   for(let i=0;i<34;i++){ const a=i/34*Math.PI*2+Rn()*0.2, rad=1500+Rn()*700, hm=new T.Mesh(new T.SphereGeometry(1,18,10),hillMat);
-    hm.scale.set(200+Rn()*300,35+Rn()*85,200+Rn()*300); hm.position.set(Math.sin(a)*rad,-15,Math.cos(a)*rad); scene.add(hm); hills.push(hm); }
+    hm.scale.set(200+Rn()*300,35+Rn()*85,200+Rn()*300); hm.position.set(Math.sin(a)*rad,-15,Math.cos(a)*rad); hm.userData={s:hm.scale.clone(), p:hm.position.clone(), a, r:Rn()}; scene.add(hm); hills.push(hm); }
+  hillMatRef=hillMat;
+  // cordillera lejana (solo en los campos de montaña, como la sabana de Bogotá)
+  const mtnMat=new T.MeshLambertMaterial({color:0x6f8ea0}); mtns=new T.Group();
+  for(let i=0;i<30;i++){ const a=i/30*Math.PI*2+Rn()*0.15, rad=2500+Rn()*300, m=new T.Mesh(new T.ConeGeometry(1,1,7),mtnMat);
+    m.scale.set(420+Rn()*420,380+Rn()*560,420+Rn()*420); m.position.set(Math.sin(a)*rad,m.scale.y/2-40,Math.cos(a)*rad); m.rotation.y=Rn()*3; mtns.add(m); }
+  mtns.visible=false; scene.add(mtns);
   // suelo base con textura repetida
   const bc=document.createElement("canvas"); bc.width=bc.height=256; const bx=bc.getContext("2d"); bx.fillStyle="#5a893a"; bx.fillRect(0,0,256,256);
   for(let k=0;k<5000;k++){ bx.fillStyle=["#4a7a2f","#6a9b45","#557f36","#79a952"][k%4]; bx.globalAlpha=0.5; bx.fillRect(Math.random()*256|0,Math.random()*256|0,2,2); }

@@ -278,14 +278,14 @@ const TPCC = [
       [38,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-OCEAN_FAR],[48,-OCEAN_FAR]]}],
     bunkers:[{c:[-15,416], rx:5, rz:3}, {c:[13,433], rx:2.5, rz:6}],
     route:[[-4,215]], corridor:75 },
-  { num:17, name:"El corto del Caribe", par:3, yards:127,
+  { num:17, name:"El corto del Caribe", par:3, yards:109,
     tip:"Par 3 corto pero lleno de problemas: bunkers alrededor y la playa con el mar a la derecha y detrás. Con viento cruzado, apunta al centro del green.",
-    pin:[-3,116], green:{c:[-3,116], rx:11, rz:10},
-    center:[[0,0],[-3,116]],
-    fairways:[{pts:[[-2,78],[-3,101]], w:8}],
-    bunkers:[{c:[-2,103], rx:7, rz:2.4}, {c:[-15,115], rx:3, rz:6}, {c:[8,126], rx:4, rz:3}],
-    water:[{kind:"ocean", beach:10, rocks:false, shore:7, pts:[[45,-40],[36,50],[24,105],[16,135],[-15,146],[-60,150],[-120,160],
-      [-OCEAN_FAR,160],[-OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-40]]}],
+    pin:[-3,100], green:{c:[-3,100], rx:11, rz:10},
+    center:[[0,0],[-3,100]],
+    fairways:[{pts:[[-2,62],[-3,85]], w:8}],
+    bunkers:[{c:[-2,87], rx:7, rz:2.4}, {c:[-15,99], rx:3, rz:6}, {c:[8,110], rx:4, rz:3}],
+    water:[{kind:"ocean", beach:10, rocks:false, shore:7, pts:[[45,-40],[36,40],[24,89],[16,119],[-15,130],[-60,134],[-120,144],
+      [-OCEAN_FAR,144],[-OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-40]]}],
     corridor:65 },
   { num:18, name:"Riesgo y premio", par:5, yards:496,
     tip:"Par 5 de riesgo y premio: una laguna a la izquierda está en juego en la segunda y en el acercamiento, y protege el frente del green. El mar sigue a la derecha.",
@@ -298,6 +298,50 @@ const TPCC = [
     buildings:[{c:[-25,515], w:60, d:22, h:10, color:0xf4efe6, roofColor:0xc0703f}],
     route:[[3,235],[2,370]], corridor:75 }
 ];
+// ---------------- generador de hoyos ----------------
+// Para los hoyos sin plano público detallado: se arman con la distancia y el par de la tarjeta real
+// y las trampas que describen las guías (agua, fuera de límites, doglegs); el resto es aproximado.
+function pathOf(pts){ const seg=[]; let s=0; for(let i=0;i<pts.length-1;i++){ const a=pts[i], b=pts[i+1], L=Math.hypot(b[0]-a[0],b[1]-a[1]); seg.push({a,b,L,s}); s+=L; }
+  const at=x=>{ x=Math.max(0,Math.min(s,x)); let g=seg.find(q=>x<=q.s+q.L)||seg[seg.length-1]; const u=(x-g.s)/(g.L||1), dr=(g.b[0]-g.a[0])/(g.L||1), dz=(g.b[1]-g.a[1])/(g.L||1);
+    return {r:g.a[0]+(g.b[0]-g.a[0])*u, z:g.a[1]+(g.b[1]-g.a[1])*u, nr:dz, nz:-dr}; };
+  return {len:s, at}; }
+// banda en coordenadas del recorrido: de s0 a s1, entre n0 y n1 metros a la derecha de la línea central
+function band(path,s0,s1,n0,n1,seed=1,wob=2){ const out=[], k=Math.max(4,Math.ceil(Math.abs(s1-s0)/12));
+  for(let i=0;i<=k;i++){ const s=s0+(s1-s0)*i/k, p=path.at(s), w=wob*Math.sin(s/19+seed); out.push([p.r+p.nr*(n0-w), p.z+p.nz*(n0-w)]); }
+  for(let i=k;i>=0;i--){ const s=s0+(s1-s0)*i/k, p=path.at(s), w=wob*Math.sin(s/23+seed*1.7); out.push([p.r+p.nr*(n1+w), p.z+p.nz*(n1+w)]); }
+  return out; }
+function genHole(o){
+  const L=Math.round(o.yd*0.9144), par=o.par, dog=(o.dog||0)*DEG, dAt=Math.min(o.dogAt||(par===3?L:par===4?Math.min(235,L-110):245), L-60);
+  const pts=[[0,0],[0,dAt]]; if(dAt<L) pts.push([Math.sin(dog)*(L-dAt), dAt+Math.cos(dog)*(L-dAt)]);
+  const path=pathOf(pts), end=path.at(path.len), seed=o.num*7+(o.seed||0);
+  const gr=o.gr||(par===3?[11,12]:[12,14]), g={c:[end.r,end.z], rx:gr[0], rz:gr[1], rot:o.gRot||0};
+  const fw=o.fw||(par===3?9:par===4?16:17), d={num:o.num, name:o.name, par, yards:o.yd, tip:o.tip, pin:[end.r+(o.pinOff||0), end.z-1], green:g,
+    center:pts, fairways:[], bunkers:[], water:[], corridor:o.corridor||62, route:[] };
+  // calle: hasta poco antes del green (con corte si hay agua cruzando)
+  const fStart=par===3?Math.max(0,L-38):(o.fStart||48), gap=(o.cross||[]).map(c=>[c.at-c.depth/2-6, c.at+c.depth/2+6]);
+  let segs=[[fStart, L-gr[1]-3]]; for(const [a,b] of gap) segs=segs.flatMap(([x,y])=>b<=x||a>=y?[[x,y]]:[[x,a],[b,y]].filter(([p,q])=>q-p>12));
+  for(const [a,b] of segs){ const k=Math.max(2,Math.ceil((b-a)/40)), fp=[]; for(let i=0;i<=k;i++){ const p=path.at(a+(b-a)*i/k); fp.push([p.r,p.z]); } d.fairways.push({pts:fp, w:fw}); }
+  // bunkers del green (2 o 3) y de calle en la zona de caída, por fuera del dogleg
+  const gb=o.gb??(par===3?3:2), ang=[[-115,0.95],[115,0.9],[180,0.85],[-25,0.9],[30,0.9]].slice(0,gb);
+  for(const [a,f] of (o.gbAng||ang)){ const t=a*DEG, rr=gr[0]+3.5, rz=gr[1]+3.5, pr=end.r+Math.sin(t)*rr*f*1.15, pz=end.z-Math.cos(t)*rz*f*1.1; d.bunkers.push({c:[pr,pz], rx:Math.abs(Math.sin(t))>0.6?2.8:5, rz:Math.abs(Math.sin(t))>0.6?5:2.6}); }
+  if(par>3 && o.fb!==0){ const side=o.fbSide||(o.dog>0?-1:o.dog<0?1:(seed%2?1:-1)), s=Math.min(dAt+10, L-140), p=path.at(s); d.bunkers.push({c:[p.r+p.nr*side*(fw+6), p.z+p.nz*side*(fw+6)], rx:side>0?4:4, rz:11, rot:0}); }
+  // agua
+  for(const w of (o.water||[])){
+    if(w.t==="side"){ const sg=w.side==="R"?1:-1, n0=(w.off??fw+8), n1=n0+(w.w||35); d.water.push({kind:"pond", edge:w.edge, pts:band(path,w.from,w.to,sg>0?n0:-n1,sg>0?n1:-n0,seed)}); }
+    if(w.t==="greenSide"){ const sg=w.side==="R"?1:-1, n0=gr[0]+(w.gap??5), n1=n0+(w.w||30); d.water.push({kind:"pond", edge:w.edge, pts:band(path,L-(w.before||45),L+(w.after||20),sg>0?n0:-n1,sg>0?n1:-n0,seed+3,1.5)}); }
+    if(w.t==="front"){ const s1=L-gr[1]-(w.gap||6), s0=s1-(w.depth||30), hw=(w.w||60)/2, off=(w.off||0); d.water.push({kind:"pond", edge:w.edge, pts:band(path,s0,s1,off-hw,off+hw,seed+5,2.5)}); }
+    if(w.t==="tee"){ d.water.push({kind:"pond", edge:w.edge, pts:band(path,w.from||15,w.to,-(w.w||50)/2+(w.off||0),(w.w||50)/2+(w.off||0),seed+9,3)}); }
+  }
+  for(const c of (o.cross||[])) d.water.push({kind:"pond", edge:c.edge, pts:band(path,c.at-c.depth/2,c.at+c.depth/2,-(c.w||90)/2,(c.w||90)/2,seed+11,2)});
+  if(o.ob) d.obSide=[{side:o.ob, off:o.obOff||(fw+16), from:-10, to:L+40}];
+  if(o.obBack) d.ob=[(()=>{ const p=path.at(L+gr[1]+8), q=path.at(L); const pts2=[]; for(const sgn of [-1,1]) pts2.push([p.r+p.nr*sgn*60, p.z+p.nz*sgn*60]);
+    pts2.push([pts2[1][0]+(p.r-q.r)*20, pts2[1][1]+(p.z-q.z)*20]); pts2.push([pts2[0][0]+(p.r-q.r)*20, pts2[0][1]+(p.z-q.z)*20]); return pts2; })()];
+  // ruta: zona de caída del drive y, en los par 5, una buena zona para dejarla
+  if(par>3){ const p=path.at(Math.min(dAt+5, L-115)); let ok=true; for(const c of (o.cross||[])) if(Math.abs(Math.min(dAt+5,L-115)-c.at)<c.depth/2+15) ok=false;
+    d.route.push(ok?[p.r,p.z]:(()=>{ const c=o.cross[0], q=path.at(c.at-c.depth/2-25); return [q.r,q.z]; })()); }
+  if(par===5){ const p=path.at(L-95); d.route.push([p.r,p.z]); }
+  if(o.trees) d.trees=o.trees; if(o.buildings) d.buildings=o.buildings; if(o.flora) d.flora=o.flora;
+  return d; }
 // el campo ficticio original (mismas posiciones que antes)
 const CLASSIC = [
   { num:1, name:"El Guayacán", par:4, tip:"Par 4 recto con bunkers a la izquierda de la calle y a la derecha del green.",
@@ -310,6 +354,44 @@ const CLASSIC = [
     pin:[10,470], green:{c:[10,470], rx:16}, center:[[0,0],[10,470]], fairways:[{pts:[[0.6,30],[9.7,456]], w:16}],
     bunkers:[{c:[21,250], rx:10}, {c:[-13,458], rx:7}], water:[{pts:[[-58,280],[-22,280],[-22,400],[-58,400]]}], route:[[4,240]], corridor:62 }
 ];
+const G=genHole;
+const CCB18 = [
+  G({num:1, name:"Salida angosta", par:4, yd:431, ob:"L", fw:14, tip:"Calle angosta con fuera de límites por toda la izquierda: un gancho termina afuera. Si fallas, que sea a la derecha."}),
+  G({num:2, name:"Par 5 de apertura", par:5, yd:519, ob:"L", dog:8, fw:16, tip:"Par 5 con fuera de límites a la izquierda y un leve giro a la derecha. Con la altura, los largos llegan en dos."}),
+  G({num:3, name:"Corto y angosto", par:4, yd:357, ob:"L", dog:-6, fw:14, tip:"Tercer hoyo seguido con fuera de límites a la izquierda. Es corto: no hace falta el driver."}),
+  G({num:4, name:"Entre árboles", par:4, yd:355, dog:10, tip:"Dogleg suave a la derecha entre árboles. Busca el lado izquierdo de la calle para ver el green."}),
+  G({num:5, name:"Par 3 largo", par:3, yd:215, gb:3, tip:"Par 3 largo con bunkers alrededor del green. En la altura, un palo menos de lo que usarías a nivel del mar."}),
+  G({num:6, name:"Dogleg izquierdo", par:4, yd:391, dog:-10, tip:"Gira a la izquierda: corta la esquina solo si estás seguro de pasar los árboles."}),
+  G({num:7, name:"El más fácil de la ida", par:3, yd:180, gb:2, tip:"El hoyo más fácil de la primera vuelta: green amplio con un bunker a cada lado."}),
+  G({num:8, name:"El corredor", par:5, yd:536, fw:13, gb:3, tip:"Par 5 angosto, con árboles a ambos lados y bunkers que protegen el green. Es de los más difíciles: juega a tres golpes."}),
+  G({num:9, name:"El táctico", par:4, yd:447, water:[{t:"tee", from:10, to:42, w:40}], cross:[{at:268, depth:30, w:110}], tip:"Hoyo táctico: agua justo delante de la salida y otra vez a unos 260 m, unos 125 m antes del green. Decide si te quedas corto o la vuelas."}),
+  G({num:10, name:"Par 3 de la vuelta", par:3, yd:228, gb:3, tip:"El par 3 más largo del campo: apunta al centro del green."}),
+  G({num:11, name:"Giro a la derecha", par:4, yd:439, dog:8, tip:"Par 4 largo con giro a la derecha y bunker en la esquina."}),
+  G({num:12, name:"El exigente", par:4, yd:457, dog:-8, fw:15, tip:"Uno de los más difíciles: largo, con giro a la izquierda y calle angosta."}),
+  CCB[0], CCB[1],
+  G({num:15, name:"Par 3 junto al lago", par:3, yd:207, water:[{t:"greenSide", side:"R", gap:16, w:26}], tip:"Par 3 con un lago a la derecha que casi no entra en juego. Los bunkers son el verdadero peligro."}),
+  G({num:16, name:"Recto entre árboles", par:4, yd:406, dog:5, tip:"Par 4 recto entre árboles, con dos bunkers en el green."}),
+  G({num:17, name:"Sin pasarse", par:4, yd:440, obBack:true, dog:-4, tip:"Fuera de límites detrás del green: mejor quedarse corto que pasarse. Precisión antes que distancia."}),
+  CCB[2]
+];
+const TPCC18 = [
+  G({num:1, name:"Agua a la derecha", par:4, yd:363, water:[{t:"side", side:"R", from:110, to:345, off:24, w:40, edge:"wood"}], tip:"Par 4 de apertura con agua por toda la derecha. Apunta al lado izquierdo de la calle."}),
+  G({num:2, name:"Primer par 5", par:5, yd:484, dog:-10, tip:"Par 5 con giro a la izquierda. Si el drive sale bien, se puede llegar en dos."}),
+  G({num:3, name:"Sobre el agua", par:3, yd:127, water:[{t:"tee", from:12, to:96, w:70, edge:"wood"}], tip:"Par 3 corto que se juega por encima del agua: no te quedes corto."}),
+  G({num:4, name:"Salida sobre el lago", par:4, yd:359, dog:-8, water:[{t:"tee", from:15, to:120, w:60, off:-18, edge:"wood"}, {t:"side", side:"L", from:120, to:250, off:22, w:45, edge:"wood"}], fStart:125, tip:"La salida pasa por encima del lago y lo rodea por la izquierda. La derecha es la zona segura."}),
+  G({num:5, name:"Par 3 de los bunkers", par:3, yd:145, gb:3, tip:"Par 3 corto con el green rodeado de bunkers."}),
+  G({num:6, name:"El largo de la ida", par:4, yd:414, dog:6, tip:"Par 4 difícil y largo: con la brisa en contra puede ser de tres golpes."}),
+  G({num:7, name:"El más difícil", par:4, yd:393, dog:-8, fw:14, gb:3, tip:"El hoyo más difícil de la tarjeta: calle angosta con giro a la izquierda y green bien protegido."}),
+  G({num:8, name:"Par 5 de la ida", par:5, yd:484, dog:8, tip:"Par 5 con giro a la derecha; la segunda debe quedar en el lado izquierdo de la calle."}),
+  G({num:9, name:"Agua junto al green", par:4, yd:357, water:[{t:"greenSide", side:"R", gap:5, w:32, edge:"wood"}], tip:"Acercamiento difícil: agua a la derecha del green. Apunta al lado izquierdo."}),
+  G({num:10, name:"Riesgo en dos", par:5, yd:476, water:[{t:"front", gap:5, depth:24, w:44, off:-8, edge:"wood"}], tip:"Ir al green en dos tiene mucho riesgo: una laguna lo protege por delante y a la izquierda."}),
+  G({num:11, name:"Par 3 corto", par:3, yd:150, gb:3, tip:"Par 3 corto: la brisa del mar cambia mucho la distancia."}),
+  G({num:12, name:"Dogleg sobre el agua", par:4, yd:412, dog:-12, cross:[{at:300, depth:30, w:80, edge:"wood"}], tip:"Dogleg a la izquierda: la segunda vuela por encima del agua hasta el green."}),
+  G({num:13, name:"Tres golpes", par:5, yd:524, fw:15, gb:3, tip:"Probablemente el hoyo más difícil: un par 5 de tres golpes para casi todos."}),
+  G({num:14, name:"A favor del viento", par:3, yd:163, gb:2, tip:"Par 3 que casi siempre juega con viento a favor: elegir el palo es la clave."}),
+  G({num:15, name:"Alcanzable con riesgo", par:4, yd:225, water:[{t:"greenSide", side:"R", gap:5, w:30, edge:"wood"}], gb:3, tip:"Par 4 corto que se puede alcanzar con el drive, pero el agua a la derecha y los bunkers castigan el error."}),
+  TPCC[0], TPCC[1], TPCC[2]
+];
 const COURSES = [
   { id:"standrews", name:"Old Course", place:"St Andrews, Escocia", style:"Links", si:0, alt:0, wind:[2,7],
     desc:"Links junto al mar: calles enormes y sin árboles (solo tojo), el Swilcan Burn, los galpones del hotel en el 17 y el pueblo a la derecha del 18.",
@@ -321,16 +403,18 @@ const COURSES = [
     desc:"El final del Stadium Course: par 5 con agua a la derecha, el green isla del 17 y el 18 con agua por toda la izquierda.",
     flora:{kinds:[["cone",.55],["palm",.2],["round",.25]], dens:.9, gap:18, spread:24, rows:2, far:70}, holes:SAW },
   { id:"bogota", name:"Country Club de Bogotá", place:"Los Fundadores · Bogotá, 2.600 m", style:"Altura", si:4, alt:2600, wind:[0,3],
-    desc:"Cancha Los Fundadores: calles angostas entre árboles, lagos en juego en el 13, el 14 y el 18, y la altura de Bogotá: la bola vuela cerca de 10% más.",
-    flora:{kinds:[["round",.55],["cone",.45]], dens:.95, gap:15, spread:20, rows:2, far:80}, holes:CCB },
+    desc:"Cancha Los Fundadores, 18 hoyos: calles angostas entre árboles, fuera de límites en la izquierda de los primeros hoyos, lagos en el 9, 13, 14 y 18, y la altura de Bogotá: la bola vuela cerca de 10% más.",
+    flora:{kinds:[["round",.55],["cone",.45]], dens:.95, gap:15, spread:20, rows:2, far:80}, scenery:"andes", holes:CCB18 },
   { id:"cartagena", name:"TPC Cartagena", place:"Karibana · Cartagena, Colombia", style:"Caribe", si:5, alt:0, wind:[3,8],
-    desc:"Diseño de Jack Nicklaus junto al mar Caribe: el 16 con el mar por toda la derecha, el 17 corto y lleno de problemas y el 18, un par 5 de riesgo y premio con laguna. Siempre hay brisa.",
-    flora:{kinds:[["palm",.6],["round",.4]], dens:.55, gap:22, spread:28, rows:1, far:60}, holes:TPCC },
+    desc:"Diseño de Jack Nicklaus junto al mar Caribe, 18 hoyos: agua en casi la mitad de los hoyos y los tres últimos junto al mar (el 16 con el mar por toda la derecha, el 17 corto y lleno de problemas y el 18 de riesgo y premio). Siempre hay brisa.",
+    flora:{kinds:[["palm",.6],["round",.4]], dens:.55, gap:22, spread:28, rows:1, far:60}, scenery:"caribe", holes:TPCC18 },
   { id:"swinglab", name:"Swing Lab", place:"Campo ficticio", style:"Clásico", si:3, alt:0,
     desc:"El campo original de la app: par 4 con bunkers, par 3 con laguna delante y par 5 con lago a la izquierda.",
     flora:{kinds:[["round",.72],["cone",.28]], dens:.8, gap:20, spread:26, rows:1, far:70}, holes:CLASSIC }
 ];
-COURSES.forEach((c,ci)=>{ c.holes=c.holes.map((d,i)=>build(d, (c.si??ci)*10+i, c.flora)); c.par=c.holes.reduce((a,h)=>a+h.par,0); });
+// los hoyos se construyen la primera vez que se usan (los campos de 18 hoyos son pesados)
+COURSES.forEach((c,ci)=>{ const defs=c.holes; c.defs=defs; c.nums=defs.map(d=>d.num); c.par=defs.reduce((a,d)=>a+d.par,0); c.n=defs.length; let built=null;
+  Object.defineProperty(c,"holes",{get(){ if(!built) built=defs.map((d,i)=>build(d,(c.si??ci)*100+i,c.flora)); return built; }}); });
 SL.COURSES = COURSES;
 SL.courseById = id=>COURSES.find(c=>c.id===id)||COURSES[0];
 SL.HOLES = SL.courseById("swinglab").holes;
