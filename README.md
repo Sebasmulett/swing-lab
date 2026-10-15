@@ -7,6 +7,8 @@ Campos disponibles, inspirados en hoyos reales (distancias, forma y trampas en s
 - **Old Course · St Andrews** — hoyos 1, 17 y 18
 - **Pebble Beach** — hoyos 7, 8 y 18
 - **TPC Sawgrass · Stadium** — hoyos 16, 17 y 18
+- **Country Club de Bogotá · Los Fundadores** — hoyos 13, 14 y 18 (a 2.600 m: la bola vuela más)
+- **TPC Cartagena at Karibana** — hoyos 16, 17 y 18, junto al mar Caribe
 - **Swing Lab** — el campo ficticio original
 
 Los nombres de los campos se usan solo como referencia; la app no está afiliada a ellos.

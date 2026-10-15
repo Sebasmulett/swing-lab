@@ -109,6 +109,11 @@ h1 span{color:var(--accent)}
 .camBox.pip{left:10px;top:78px;width:min(30%,138px);aspect-ratio:3/4;border-radius:12px;border:2px solid rgba(255,255,255,.9);box-shadow:0 6px 18px rgba(0,0,0,.35)}
 .camBox.pip.ready{border-color:#7dff9a;box-shadow:0 0 0 3px rgba(125,255,154,.45),0 6px 18px rgba(0,0,0,.35)}
 .camBox.paused video{filter:grayscale(1) brightness(.55)}
+.camTgt{position:absolute;left:6px;top:6px;z-index:3;background:rgba(242,194,48,.92);color:#1d1600;border-radius:99px;padding:3px 8px;font:700 .72rem var(--body);pointer-events:none}
+.camBox.pip .camTgt{top:auto;bottom:44px}
+.camBox.big .camTgt{top:76px;left:12px;font-size:.9rem;padding:5px 12px}
+.guideSvg{width:100%;height:auto;color:var(--ink);--fairwayG:#7db353}
+.guideList{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:.92rem;line-height:1.4}
 .camBtns{position:absolute;right:4px;top:4px;display:flex;gap:4px;z-index:3}
 .camBtns button{appearance:none;width:30px;height:30px;border-radius:50%;border:0;background:rgba(8,24,18,.78);color:#fff;font-size:.85rem;line-height:1;cursor:pointer;padding:0}
 .camBox.big .camBtns{top:auto;bottom:12px;right:12px;gap:8px}
@@ -121,7 +126,7 @@ h1 span{color:var(--accent)}
 .camMsg{position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);text-align:center;font:700 clamp(1.4rem,6vw,2.2rem)/1.15 var(--display);letter-spacing:.03em;text-transform:uppercase;color:#fff;
   text-shadow:0 2px 12px rgba(0,0,0,.7);pointer-events:none}
 .camMsg.ready{color:#7dff9a}.camMsg.bad{color:#ffd0c8;font-size:clamp(1.1rem,4.6vw,1.5rem)}
-.replayBtn{position:absolute;right:10px;top:76px;z-index:3;appearance:none;border:0;border-radius:99px;padding:7px 12px;background:rgba(8,24,18,.8);color:#fff;font:600 .8rem var(--body);cursor:pointer}
+.replayBtn{position:absolute;right:10px;bottom:216px;z-index:3;appearance:none;border:0;border-radius:99px;padding:7px 12px;background:rgba(8,24,18,.8);color:#fff;font:600 .8rem var(--body);cursor:pointer}
 .aimBar{position:absolute;left:10px;bottom:84px;z-index:3;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 100px)}
 .aimBar button{appearance:none;border:0;border-radius:99px;min-width:38px;height:38px;padding:0 12px;background:rgba(8,24,18,.8);color:#fff;font:700 .9rem var(--body);cursor:pointer}
 .aimBar button.go2{background:var(--accent);color:var(--accent-ink)}
@@ -149,6 +154,13 @@ button:focus-visible,select:focus-visible,input:focus-visible,summary:focus-visi
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .chip{appearance:none;flex:1 1 0;min-width:88px;padding:9px 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 .95rem var(--body);cursor:pointer;position:relative}
 .chip[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.chip.sm{min-width:64px;padding:6px 8px;font-size:.82rem;border-radius:99px}
+.chip.sm[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chip:disabled{opacity:.4}
+.quickCal{border:2px solid var(--accent);border-radius:14px;padding:12px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
+.quickCal .qrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.quickCal input{width:5.2em;padding:7px 8px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:600 1rem var(--body)}
+.quickCal select{padding:7px 8px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:400 .9rem var(--body)}
 .chip .sug{position:absolute;top:-8px;right:6px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;background:var(--accent);color:var(--accent-ink);border-radius:6px;padding:1px 5px}
 .ghost{appearance:none;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 14px;font:600 .9rem var(--body);cursor:pointer}
 .ghost.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -245,6 +257,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <canvas id="camCanvas"></canvas>
       <div class="camMsg" id="camMsg" hidden></div>
       <div class="camBtns"><button id="camPause" aria-label="Pausar la lectura">⏸</button><button id="camSize" aria-label="Agrandar la cámara">⤢</button></div>
+      <div class="camTgt" id="camTgt" aria-hidden="true"></div>
     </div>
     <button class="replayBtn" id="replayBtn" hidden>▶ Repetición</button>
     <div class="aimBar" id="aimBar" hidden>
@@ -283,16 +296,26 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <span class="lab2">Medir con</span>
     <div class="seg big" id="inputSeg" role="group" aria-label="Forma de medir"><button data-i="sensor" aria-pressed="true">Sensor del teléfono</button><button data-i="camera" aria-pressed="false">Cámara</button></div>
   </div>
-  <p class="note" id="camHelp" hidden>Apoya el teléfono a 2 o 3 metros, de frente a ti y a la altura de tu cintura, con todo tu cuerpo en la imagen. Puedes hacer el swing con las manos vacías, con un palo o con algo que lo simule. Para medir mejor: mucha luz (mejor de día o con la luz a tu frente), ropa que contraste con el fondo y el teléfono bien quieto. Elige el palo antes de cada swing: la velocidad del palo sale de la de tus manos según el largo de ese palo. La cámara aparece en pequeño sobre el campo para que veas a dónde apuntas: tócala o usa ⤢ para agrandarla. Mientras apuntas no se leen swings; al tocar <b>Listo</b> tienes unos segundos para ponerte en posición. Con ⏸ pausas la lectura cuando quieras.</p>
+  <p class="note" id="camHelp" hidden>Apoya el teléfono a 2 o 3 metros, de frente a ti y a la altura de tu cintura, con todo tu cuerpo en la imagen. Puedes hacer el swing con las manos vacías, con un palo o con algo que lo simule. Para medir mejor: mucha luz (mejor de día o con la luz a tu frente), ropa que contraste con el fondo y el teléfono bien quieto. Elige el palo antes de cada swing: la velocidad del palo sale de la de tus manos según el largo de ese palo. La cámara aparece en pequeño sobre el campo para que veas a dónde apuntas: tócala o usa ⤢ para agrandarla. Mientras apuntas no se leen swings; al tocar <b>Listo</b> tienes unos segundos para ponerte en posición. Con ⏸ pausas la lectura cuando quieras. <button class="ghost" id="guideShow">📐 Cómo colocar la cámara</button></p>
   <div class="actions">
     <button class="go" id="go">Activar sensores</button>
     <button class="test" id="testShot">Golpe de prueba</button>
+  </div>
+  <div class="quickCal" id="quickCal" hidden>
+    <b>Ajusta la app a tu golpe</b>
+    <div class="qrow"><label for="qcDist">Con el driver pego</label><input id="qcDist" type="number" inputmode="decimal" min="40" max="420" placeholder="225"><span id="qcUnit">yd</span>
+      <select id="qcKind" aria-label="Tipo de distancia"><option value="total">en total</option><option value="carry">de vuelo (carry)</option></select></div>
+    <div class="qrow"><label for="qcAlt">Juego normalmente en</label><select id="qcAlt"><option value="0">nivel del mar</option><option value="1000">Cali (~1.000 m)</option><option value="1500">Medellín (~1.500 m)</option><option value="2600">Bogotá (2.600 m)</option></select></div>
+    <div class="row"><button class="ghost primary" id="qcSave">Guardar</button><button class="ghost" id="qcLater">Ahora no</button></div>
+    <p class="note" id="qcState"></p>
+    <p class="note">En la altura la bola vuela cerca de 10% más. Después de 3 swings reales con el driver, la app ajusta tu velocidad para que tu golpe típico vuele eso, y lo aplica a los demás palos.</p>
   </div>
   <p class="note" id="msg"></p>
   <p class="note" id="live" hidden></p>
 
   <div class="row clubs" id="clubRow" role="group" aria-label="Palo">
   </div>
+  <div class="row clubs shots" id="shotRow" role="group" aria-label="Tipo de golpe"></div>
 
   <section data-for="course" hidden>
     <h2>Campo</h2>
@@ -385,7 +408,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="dbody">
       <h2>Con tus distancias</h2>
       <p class="note">Como el teléfono no pesa como un palo, la forma más fácil de afinar es decirle a la app cuánto vuela tu golpe normal. Después de 3 swings reales con ese palo, tus swings típicos caerán a esa distancia.</p>
-      <div class="row"><label for="myCarryIn">Carry de tu <span id="myCarryClub">Driver</span></label><input type="number" id="myCarryIn" inputmode="decimal" min="5" max="400"><span id="myCarryUnit">m</span><button class="ghost primary" id="myCarrySave">Guardar</button><button class="ghost" id="myCarryReset">Borrar</button></div>
+      <div class="row"><label for="myCarryIn">Distancia de tu <span id="myCarryClub">Driver</span></label><input type="number" id="myCarryIn" inputmode="decimal" min="5" max="400"><span id="myCarryUnit">m</span><select id="myKindSel" aria-label="Tipo de distancia"><option value="carry">carry</option><option value="total">total</option></select><button class="ghost primary" id="myCarrySave">Guardar</button><button class="ghost" id="myCarryReset">Borrar</button></div>
       <p class="note" id="myCarryState"></p>
       <h2>Con radar</h2>
       <p class="note">Con un radar de swing o un simulador: haz un swing, escribe lo que marcó el radar como velocidad del palo y guarda. Sirve para el sensor y para la cámara (cada uno se calibra aparte). Con 3 a 5 swings la app se ajusta sola, y los palos que no calibres usan lo aprendido con los demás.</p>
@@ -403,6 +426,8 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <select id="units"><option value="mph">mph</option><option value="kmh">km/h</option><option value="ms">m/s</option></select>
       <label for="dist">Distancia</label>
       <select id="dist"><option value="m">metros</option><option value="yd">yardas</option></select>
+      <label for="alt">Altura de tu cancha habitual (range)</label>
+      <select id="alt"><option value="0">Nivel del mar</option><option value="1000">Cali (~1.000 m)</option><option value="1500">Medellín (~1.500 m)</option><option value="2600">Bogotá (2.600 m)</option></select>
       <label for="hand">Juego</label>
       <select id="hand"><option value="R">Diestro</option><option value="L">Zurdo</option></select>
       <label for="hold">Cómo sostienes el teléfono</label>
@@ -440,6 +465,36 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="intro" id="camGuide" hidden role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+  <div class="box">
+    <h2 id="guideTitle">Cómo colocar la cámara</h2>
+    <svg class="guideSvg" viewBox="0 0 320 250" role="img" aria-label="Vista desde arriba: el teléfono de frente al jugador a 2 o 3 metros, el objetivo hacia un lado; o detrás del jugador mirando al objetivo">
+  <defs><marker id="ga" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+  <rect x="8" y="8" width="304" height="234" rx="14" fill="var(--fairwayG)" opacity=".35"/>
+  <line x1="40" y1="96" x2="292" y2="96" stroke="currentColor" stroke-dasharray="5 5" opacity=".55"/>
+  <text x="250" y="86" text-anchor="end" font-size="11" fill="currentColor" opacity=".8">línea de tiro</text>
+  <line x1="150" y1="96" x2="44" y2="96" stroke="var(--accent)" stroke-width="4" marker-end="url(#ga)" color="var(--accent)"/>
+  <text x="44" y="120" font-size="12" font-weight="700" fill="var(--accent)">🎯 Objetivo</text>
+  <circle cx="150" cy="96" r="4.5" fill="#fff" stroke="currentColor"/>
+  <ellipse cx="150" cy="58" rx="22" ry="10" fill="currentColor" opacity=".85"/><circle cx="150" cy="58" r="8" fill="var(--surface)" stroke="currentColor" stroke-width="2"/>
+  <text x="182" y="54" font-size="11" fill="currentColor">tú (de frente</text><text x="182" y="67" font-size="11" fill="currentColor">a la cámara)</text>
+  <rect x="140" y="196" width="20" height="32" rx="4" fill="currentColor"/><rect x="143" y="199" width="14" height="22" rx="2" fill="var(--accent)"/>
+  <line x1="150" y1="192" x2="150" y2="74" stroke="currentColor" stroke-dasharray="3 5" opacity=".6"/>
+  <text x="166" y="208" font-size="12" font-weight="700" fill="currentColor">Teléfono de frente</text>
+  <text x="166" y="222" font-size="10.5" fill="currentColor">a 2-3 m, altura de cintura</text>
+  <text x="166" y="235" font-size="10.5" fill="currentColor">velocidad, ataque y ruta</text>
+  <rect x="268" y="84" width="14" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2"/>
+  <text x="300" y="132" text-anchor="end" font-size="10.5" fill="currentColor" opacity=".85">o detrás de ti,</text><text x="300" y="145" text-anchor="end" font-size="10.5" fill="currentColor" opacity=".85">mirando al objetivo</text><text x="300" y="158" text-anchor="end" font-size="10.5" fill="currentColor" opacity=".85">(mejor para la ruta)</text>
+</svg>
+    <ul class="guideList">
+      <li><b>De frente</b> (lo recomendado): apoya el teléfono a 2 o 3 metros, frente a tu pecho, a la altura de la cintura y bien quieto. El objetivo queda a un lado: <span id="guideSide">a tu izquierda si eres diestro</span>.</li>
+      <li>Que se vea <b>todo tu cuerpo</b>, de la cabeza a los pies, con buena luz de frente.</li>
+      <li><b>Desde atrás</b>: el teléfono detrás de ti, sobre la línea de tiro, mirando hacia el objetivo. Ve mejor la ruta del palo; la velocidad es aproximada. Cambia la vista en Ajustes.</li>
+      <li>En la ventana de la cámara verás qué corregir y una flecha 🎯 hacia el objetivo. Cuando el borde se ponga verde, haz tu swing.</li>
+    </ul>
+    <div class="row"><button class="ghost primary" id="guideOk">Entendido</button></div>
+  </div>
+</div>
 <div class="intro" id="intro" hidden role="dialog" aria-modal="true" aria-labelledby="introTitle">
   <div class="box">
     <h2 id="introTitle">Antes del primer swing</h2>
@@ -454,10 +509,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.10"></script>
-<script src="js/courses.js?v=0.10"></script>
-<script src="js/world3d.js?v=0.10"></script>
-<script src="js/camera.js?v=0.10"></script>
-<script src="js/app.js?v=0.10"></script>
+<script src="js/engine.js?v=0.11"></script>
+<script src="js/courses.js?v=0.11"></script>
+<script src="js/world3d.js?v=0.11"></script>
+<script src="js/camera.js?v=0.11"></script>
+<script src="js/app.js?v=0.11"></script>
 </body>
 </html>

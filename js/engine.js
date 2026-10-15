@@ -223,6 +223,23 @@ SL.analyze = function(Sm, clubKey, opts={}){
 
 // ---------- física del vuelo ----------
 const AERO={cd0:0.24, cd1:0.2, a:1.8, b:1, clMax:0.3};
+// Aire: a más altura, menos densidad y la bola vuela más (Bogotá, 2.600 m: cerca de 10% más)
+SL.env={alt:0, rho:1.2}; let LIFT_EXP=0.5; SL._liftExp=v=>{ LIFT_EXP=v; };
+SL.rhoAt=alt=>1.2*Math.pow(1-2.2558e-5*Math.max(0,alt),4.2559);
+SL.setAlt=alt=>{ SL.env.alt=alt||0; SL.env.rho=SL.rhoAt(SL.env.alt); };
+SL.withAlt=(alt,fn)=>{ const a=SL.env.alt; SL.setAlt(alt); try{ return fn(); } finally { SL.setAlt(a); } };
+// Tipos de golpe: cambian la salida y el efecto. Draw y fade buscan terminar sobre la línea de mira.
+SL.SHOTS={ normal:{name:"Normal"}, draw:{name:"Draw", tilt:-9}, fade:{name:"Fade", tilt:8},
+  alto:{name:"Alto", launch:4, spin:1.12, v:0.985}, bajo:{name:"Bajo", launch:-4, spin:0.78, v:0.975}, flop:{name:"Flop", launch:13, spin:1.18, v:0.78, wedges:true} };
+SL.applyShot=function(o, type, hand){
+  const T=SL.SHOTS[type]; if(!T || type==="normal") return o; const hs=hand==="L"?-1:1;
+  o=Object.assign({},o);
+  if(T.launch) o.launch=Math.max(3,o.launch+T.launch); if(T.spin) o.spin*=T.spin; if(T.v) o.v*=T.v;
+  if(T.tilt){ const tilt=T.tilt*hs;
+    // salida hacia el lado contrario para que la curva la devuelva a la línea de mira (los errores medidos se suman encima)
+    let lo=-12, hi=12; for(let i=0;i<16;i++){ const m=(lo+hi)/2, f=flight(Object.assign({},o,{dir:m, tilt}),[0,0]); if(f.x>0) hi=m; else lo=m; }
+    o.dir+=(lo+hi)/2; o.tilt+=tilt; o.shape=type; }
+  return o; };
 SL.LIES={tee:{speed:1,spin:1}, fairway:{speed:1,spin:1}, rough:{speed:0.9,spin:0.6}, bunker:{speed:0.75,spin:0.5}, green:{speed:1,spin:1}, road:{speed:1,spin:0.85}};
 const GROUND={tee:{e:.25,mu:.25,k:1}, fairway:{e:.25,mu:.25,k:1}, rough:{e:.15,mu:.7,k:.6}, green:{e:.3,mu:.12,k:.95}, bunker:{e:.05,mu:2.5,k:.15}, road:{e:.4,mu:.16,k:1.08}};
 // Plano D: la salida la manda sobre todo la cara; la curva, la diferencia entre cara y ruta
@@ -234,7 +251,8 @@ SL.launchFor = function(clubKey, ms, h, lie, hand){
            spin: c.spin*(0.6+0.4*ms/c.vref)*L.spin*Math.max(0.6,1-0.035*aoa), dir:(0.78*f+0.22*p)*hs, tilt:clamp(1.9*(f-p),-32,32)*hs };
 };
 function flight(o, wind){
-  const m=0.04593, r=0.02135, A=Math.PI*r*r, k=0.5*1.2*A/m, g=9.81, dt=0.01;
+  // la sustentación pierde menos que el arrastre con la altura (calibrado a ~+10% de carry en Bogotá, como reportan los clubes)
+  const m=0.04593, r=0.02135, A=Math.PI*r*r, k=0.5*SL.env.rho*A/m, kL=0.5*1.2*Math.pow(SL.env.rho/1.2,LIFT_EXP)*A/m, g=9.81, dt=0.01;
   let vx=o.v*Math.cos(o.launch*DEG)*Math.sin(o.dir*DEG), vy=o.v*Math.sin(o.launch*DEG), vz=o.v*Math.cos(o.launch*DEG)*Math.cos(o.dir*DEG);
   let x=0,y=0,z=0,w=o.spin*2*Math.PI/60,t=0,apex=0;
   const ct=Math.cos(o.tilt*DEG), st=Math.sin(o.tilt*DEG), W=wind||[0,0], pts=[{t:0,x:0,y:0,z:0}];
@@ -244,7 +262,7 @@ function flight(o, wind){
     const Sp=w*r/v, Cl=Math.min(AERO.clMax,Math.max(0,AERO.a*Sp-AERO.b*Sp*Sp)), Cd=AERO.cd0+AERO.cd1*Sp;
     const hz=Math.hypot(rx,rz)||1, px=-rz/hz, pz=rx/hz, sx=px*ct, sy=st, sz=pz*ct;
     const lx=sy*rz-sz*ry, ly=sz*rx-sx*rz, lz=sx*ry-sy*rx, ln=Math.hypot(lx,ly,lz)||1;
-    const fD=k*Cd*v*v, fL=k*Cl*v*v;
+    const fD=k*Cd*v*v, fL=kL*Cl*v*v;
     vx+=(-fD*rx/v+fL*lx/ln)*dt; vy+=(-fD*ry/v+fL*ly/ln-g)*dt; vz+=(-fD*rz/v+fL*lz/ln)*dt;
     const py=y, px0=x, pz0=z; x+=vx*dt; y+=vy*dt; z+=vz*dt; w*=Math.exp(-dt/30); t+=dt; apex=Math.max(apex,y);
     if(y<0 && t>0.05){ const f=py/(py-y); x=px0+(x-px0)*f; z=pz0+(z-pz0)*f; t=t-dt+dt*f; y=0; pts.push({t,x,y,z}); break; }

@@ -43,7 +43,9 @@ function localVel(T, P, tc, half, dims){
   if(idx.length<4) return null; const deg=idx.length>=6?3:2, xs=idx.map(i=>(T[i]-tc)/1000), ws=idx.map(i=>1-0.5*Math.abs(T[i]-tc)/half);
   const v=[]; for(let d=0;d<dims;d++){ const c=polyfit(xs, idx.map(i=>P[i][d]), ws, deg); if(!c) return null; v.push(c[1]); } return v;
 }
-const SINA_MIN=0.6; let HALF_MIN=75, HALF_K=2.05; SL._camTune=(a,b)=>{ HALF_MIN=a; HALF_K=b; };
+const SINA_MIN=0.6;
+// la profundidad 3D es ruidosa: a pocos cuadros por segundo se atenúa la ruta medida (estimador con encogimiento)
+const PATH_SHRINK=fps=>fps>=50?0.8:fps>=35?0.7:0.6; let HALF_MIN=75, HALF_K=2.05; SL._camTune=(a,b)=>{ HALF_MIN=a; HALF_K=b; };
 // pico de una curva muestreada en 15 puntos: vértice de una parábola alrededor del máximo (no el máximo crudo, que se infla con el ruido)
 function peakOf(fn){ const v=[]; for(let k=0;k<=14;k++){ const x=fn(k); v.push(x==null?NaN:x); }
   let m=-1; v.forEach((x,k)=>{ if(isFinite(x) && (m<0 || x>v[m])) m=k; }); if(m<0) return 0;
@@ -134,6 +136,18 @@ SL.analyzePose=function(F, clubKey, opts={}){
   const ratio=SL.camRatio(clubKey, arm, grip);
 
   // ---- punto bajo del arco y ángulo de ataque (solo de frente) ----
+  // ---- ruta del swing (de adentro hacia afuera o al revés), de la dirección de las manos en el impacto ----
+  // De frente: la profundidad sale de las coordenadas 3D de MediaPipe (más ruidosa, por eso se atenúa);
+  // desde atrás: el movimiento hacia afuera se ve directo en la imagen. La cara se asume cuadrada al objetivo.
+  let path=0, pathOk=false, pathRaw=null;
+  if(view==="front"){
+    const W3=F.map(f=>f.m&&f.m.lw&&f.m.rw?[(f.m.lw[0]+f.m.rw[0])/2,(f.m.lw[1]+f.m.rw[1])/2,(f.m.lw[2]+f.m.rw[2])/2]:null);
+    if(W3.every(Boolean)){ const v=localVel(t,W3,tImp,Math.max(half*1.6,110),3);
+      if(v && Math.abs(v[0])>1.5){ pathRaw=Math.atan2(-v[2],Math.abs(v[0]))/DEG; path=Math.round(clamp(pathRaw*PATH_SHRINK(fps),-12,12)*10)/10; pathOk=true; } }
+  } else {
+    const out=Math.sign(Hn[a][0]-Hp[a][0])||1, v=localVel(t,Hm,tImp,half,2);
+    if(v){ const along=Math.max(2,handMax*0.92); pathRaw=Math.atan2(v[0]*out,along)/DEG; path=Math.round(clamp(pathRaw,-12,12)*10)/10; pathOk=true; }
+  }
   let lowCm=null, aoa=0, aoaOk=false;
   if(view==="front"){
     const idx=[]; for(let i=Math.max(top,a);i<=fin;i++) if(Math.abs(ang[i])<=72*DEG) idx.push(i);
@@ -181,7 +195,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
     est:{img:+e2dMax.toFixed(2), model:eModel?+eModel.toFixed(2):null, w3d:e3d?+e3d.toFixed(2):null},
     omega:null, peak:null, obs:Math.round(handMax*100)/100, sat:false, method:"pose", seg:"pose",
     back:okT?back:null, down:okT?down:null, ratio: okT?back/down:null,
-    face:0, faceOk:false, path:0, pathOk:false, aoa, aoaOk, lowCm, arcTop, arcFin, len: arcTop<100?"medio":arcTop<150?"tres cuartos":"completo",
+    face:0, faceOk:false, path, pathOk, pathRaw:pathRaw==null?null:+pathRaw.toFixed(1), faceAssumed:true, aoa, aoaOk, lowCm, arcTop, arcFin, len: arcTop<100?"medio":arcTop<150?"tres cuartos":"completo",
     posture, camQ, hz:Math.round(fps),
     trace:{ t:t.slice(i0,i1+1).map(v=>v-t[i0]), d:ang.slice(i0,i1+1).map(v=>v/DEG), phi:ang.slice(i0,i1+1).map(v=>+(v/DEG).toFixed(1)),
             start:st-i0, top:top-i0, imp:imp-i0, fin:fin-i0, signed:true },
@@ -210,6 +224,8 @@ SL.synthPose=function(o={}){
       lw:[hand[0]+4+nz(),hand[1]+nz()], rw:[hand[0]-4+nz(),hand[1]+nz()], lh:[cx+sway*ppm+hw/2+nz(),hipY+nz()], rh:[cx+sway*ppm-hw/2+nz(),hipY+nz()],
       lk:[cx+0.12*ppm,hipY+0.45*ppm], rk:[cx-0.12*ppm,hipY+0.45*ppm], la:[cx+0.14*ppm,hipY+0.9*ppm], ra:[cx-0.14*ppm,hipY+0.9*ppm]};
     const v1={}, m={}; for(const k in P){ v1[k]=0.95; m[k]=[(P[k][0]-cx)/ppm,(P[k][1]-hipY)/ppm,0]; }
+    // ruta: las manos van hacia la cámara (z negativo) después del punto bajo si es de adentro hacia afuera
+    if(o.path){ for(const k of ["lw","rw"]) m[k][2]=-Math.tan(o.path*DEG)*((P[k][0]-S[0])/ppm)*hs; }
     out.push({t:t0+tt*1000, w:W, h:H, p:P, v:v1, m}); tt+=dt; };
   const turnTop=(o.turn??80)*DEG, swayTop=(o.sway??0)/100, headImp=(o.head??0)/100*hs;
   for(let i=0;i<Math.round(0.7/dt);i++) frame(0,0,0,0);
@@ -294,6 +310,22 @@ function handle(f){
   const now=f.t; fpsTimes.push(now); if(fpsTimes.length>40) fpsTimes.shift(); if(fpsTimes.length>5) Cam.fps=Math.round((fpsTimes.length-1)/((fpsTimes[fpsTimes.length-1]-fpsTimes[0])/1000));
   lastFrame=f; if(!replaying) draw(f); step(f);
 }
+// Guía de colocación: qué falta para que la cámara te lea bien
+function missingHint(f){
+  if(f.none || !f.v) return "No te veo: ponte frente a la cámara, a 2 o 3 metros";
+  if((f.v.la??1)<0.45 && (f.v.ra??1)<0.45) return "No veo tus pies: aleja el teléfono o apúntalo un poco más abajo";
+  if((f.v.nose??1)<0.45) return "No veo tu cabeza: aleja el teléfono o apúntalo un poco más arriba";
+  if(["lw","rw"].some(k=>f.v[k]<0.45)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
+  return "No te veo completo: ponte a 2 o 3 metros, con todo el cuerpo en la imagen"; }
+function setupHint(f){
+  const p=f.p, W=f.w||1, H=f.h||1, sw=dist(p.ls,p.rs), tor=dist(mid(p.ls,p.rs),mid(p.lh,p.rh))||1, r=sw/tor;
+  const top=Math.min(p.nose[1], p.ls[1]), bot=Math.max(p.la?p.la[1]:0, p.ra?p.ra[1]:0), hgt=(bot-top)/H, cx=mid(p.lh,p.rh)[0]/W;
+  if(hgt>0.93) return "Muy cerca: aleja el teléfono un paso";
+  if(hgt<0.42) return "Muy lejos: acércate un poco a la cámara";
+  if(cx<0.22 || cx>0.78) return "Muévete al centro de la imagen";
+  if(opts.view!=="behind" && r<0.42) return "Ponte de frente a la cámara (el objetivo a un lado)";
+  if(opts.view==="behind" && r>0.62) return "Para la vista desde atrás, la cámara va detrás de ti, mirando al objetivo";
+  return null; }
 // máquina de estados: buscar cuerpo → quieto en address → swing → final
 // Solo se dispara desde "listo" (quieto en address): caminar o acomodarse ya no se confunde con un swing.
 const coreVisible=f=>["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
@@ -303,7 +335,7 @@ function step(f){
   if(Cam.paused){ trail=[]; return; }
   // durante el swing las muñecas se ven borrosas: basta con ver hombros y caderas (las manos se estiman igual)
   const ok=!f.none && (st==="capture" ? coreVisible(f) && ["lw","rw"].every(k=>f.v[k]>0.1) : visibleBody(f));
-  if(!ok){ if(st!=="capture"){ st="seek"; stillSince=null; readyHip=null; trail=[]; status("No te veo completo: ponte de frente, a 2 o 3 metros","bad"); } return; }
+  if(!ok){ if(st!=="capture"){ st="seek"; stillSince=null; readyHip=null; trail=[]; status(missingHint(f),"bad"); } return; }
   buf.push(f); while(buf.length && now-buf[0].t>6500) buf.shift();
   const torso=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1, hand=mid(f.p.lw,f.p.rw), hip=mid(f.p.lh,f.p.rh);
   const prev=buf[buf.length-2]; let v=0; if(prev && prev.p){ const h0=mid(prev.p.lw,prev.p.rw); v=dist(hand,h0)/Math.max(0.001,(now-prev.t)/1000)/torso; }
@@ -311,7 +343,7 @@ function step(f){
   if(now<coolUntil){ trail=[]; if(Cam.graceMsg) status(Cam.graceMsg+" "+Math.ceil((coolUntil-now)/1000),"wait"); return; }
   if(st==="seek"||st==="ready"){
     trail=[];
-    if(st==="seek") status("Quieto en address…","wait");
+    if(st==="seek"){ const hn=v<0.6?setupHint(f):null; status(hn||"Quieto en address…", hn?"bad":"wait"); }
     if(v<0.3){ if(stillSince==null) stillSince=now; else if(st==="seek" && now-stillSince>=450){ st="ready"; readyHip=hip; status("¡Listo! Haz tu swing","ready"); cb.onReady&&cb.onReady(); } }
     else if(v>0.6) stillSince=null;
     // si caminas (la cadera se va del sitio) vuelve a esperar el address

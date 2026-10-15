@@ -89,10 +89,11 @@ function paintHole(ctx,B,sx,sz,W,P,shadowsOf){
   for(const w of h.water){
     const shore=w.closed?w.pts.concat([w.pts[0]]):w.pts.slice(0,w.shore);
     ctx.lineJoin="round"; ctx.lineCap="round";
-    if(w.kind==="ocean"){ polyPath(ctx,shore,false); ctx.strokeStyle="#cdbb8e"; ctx.lineWidth=9; ctx.stroke(); ctx.strokeStyle="#6a6253"; ctx.lineWidth=4; ctx.stroke(); }
+    if(w.kind==="ocean" && w.beach){ polyPath(ctx,shore,false); ctx.strokeStyle="#ead9ad"; ctx.lineWidth=w.beach*2; ctx.stroke(); ctx.strokeStyle="#d3bf8c"; ctx.lineWidth=3; ctx.stroke(); }
+    else if(w.kind==="ocean"){ polyPath(ctx,shore,false); ctx.strokeStyle="#cdbb8e"; ctx.lineWidth=9; ctx.stroke(); ctx.strokeStyle="#6a6253"; ctx.lineWidth=4; ctx.stroke(); }
     else if(w.kind==="burn"){ polyPath(ctx,shore,false); ctx.strokeStyle="#8f8a7d"; ctx.lineWidth=1.6; ctx.stroke(); }
     else { polyPath(ctx,shore,false); ctx.strokeStyle="#3f6e2f"; ctx.lineWidth=5; ctx.stroke(); }
-    ctx.fillStyle=w.kind==="ocean"?"#1b5577":"#1f5a80"; polyPath(ctx,w.pts); ctx.fill();
+    ctx.fillStyle=w.kind==="ocean"?(w.beach?"#1f7a96":"#1b5577"):"#1f5a80"; polyPath(ctx,w.pts); ctx.fill();
     if(w.edge==="wood"){ polyPath(ctx,shore,false); ctx.strokeStyle="#4a3826"; ctx.lineWidth=0.8; ctx.stroke(); }
   }
   // tierra dentro del agua (isla y pasillo)
@@ -256,9 +257,9 @@ W3.setHole=function(h){
   const inB=(p,m)=>p.x>B.x0-m && p.x<B.x1+m && p.z>B.z0-m && p.z<B.z1+m;
   // agua (mar, lagos y arroyos)
   for(const w of h.water){ const wm=new T.Mesh(shapeGeo(w.pts,0.03),
-      new T.MeshPhongMaterial({color:w.kind==="ocean"?0x1f5f86:0x2a6c96, specular:0xcfe8ff, shininess:w.kind==="ocean"?90:120, transparent:true, opacity:0.93, polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6}));
+      new T.MeshPhongMaterial({color:w.kind==="ocean"?(w.beach?0x2a8aa8:0x1f5f86):0x2a6c96, specular:0xcfe8ff, shininess:w.kind==="ocean"?90:120, transparent:true, opacity:0.93, polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6}));
     world.add(wm);
-    if(w.kind==="ocean"){ // rocas a lo largo de la costa
+    if(w.kind==="ocean" && w.rocks){ // rocas a lo largo de la costa
       const sh=w.pts.slice(0,w.shore), Rn=SL.rng(h.seed*13), list=[];
       for(let i=0;i<sh.length-1;i++){ const a=sh[i], b=sh[i+1], L=Math.hypot(b.x-a.x,b.z-a.z); for(let s=0;s<L;s+=2.6){ const u=s/L, x=a.x+(b.x-a.x)*u, z=a.z+(b.z-a.z)*u; if(!inB({x,z},40)) continue;
         const nx=-(b.z-a.z)/L, nz=(b.x-a.x)/L, sg=SL.geo.inPoly(w.pts,x+nx*2,z+nz*2)?1:-1, o=Rn()*3.5; list.push({x:x+nx*sg*o, z:z+nz*sg*o, s:0.5+Rn()*1.7, r:Rn()}); } }

@@ -84,7 +84,8 @@ function build(d, idx, fl){
   h.fairSamples=[].concat(...h.fairways.map(f=>f.samples));
   h.bunkers=(d.bunkers||[]).map(E);
   h.swales=(d.swales||[]).map(E);
-  h.water=(d.water||[]).map(w=>({kind:w.kind||"pond", pts:w.pts.map(P), shore:w.shore??w.pts.length, edge:w.edge||null, closed:w.shore==null}));
+  h.water=(d.water||[]).map(w=>{ const pts=w.pts.map(P), shore=w.shore??w.pts.length; return {kind:w.kind||"pond", pts, shore, edge:w.edge||null, closed:w.shore==null,
+    beach:w.beach||0, rocks:w.rocks!==false, shorePts:w.shore==null?pts.concat([pts[0]]):pts.slice(0,shore)}; });
   h.land=(d.land||[]).map(l=>({pts:l.pts.map(P), kind:l.kind||"fairway"}));
   h.ob=[]; h.stakes=[];
   (d.ob||[]).forEach(o=>{ const pts=o.map(P); h.ob.push(pts); h.stakes.push(pts.concat([pts[0]])); });
@@ -111,6 +112,7 @@ SL.lieAt = function(h,x,z){
   for(const b of h.bunkers) if(inEll(b,x,z)) return "bunker";
   for(const l of h.land) if(inPoly(l.pts,x,z)) return l.kind==="fairway"?"fairway":"rough";
   for(const w of h.water) if(inPoly(w.pts,x,z)) return "water";
+  for(const w of h.water) if(w.beach && distPoly(w.shorePts,x,z)<w.beach) return "bunker";   // playa: arena
   for(const b of h.buildings) if(b.ob && inRect(b,x,z)) return "ob";
   for(const p of h.ob) if(inPoly(p,x,z)) return "ob";
   if(z<-14 || distPoly(h.center,x,z)>h.corridor) return "ob";
@@ -236,6 +238,66 @@ const SAW = [
     buildings:[{c:[-50,512], w:60, d:30, h:14, color:0xeee3cf, roofColor:0xb5653b}],
     route:[[-18,225],[-45,330]], corridor:80 }
 ];
+// Country Club de Bogotá, cancha Los Fundadores (2.600 m): lagos en el 13, 14 y 18, árboles por todas partes
+const CCB = [
+  { num:13, name:"El más difícil", par:5, yards:585,
+    tip:"El hoyo más difícil del campo: por la izquierda hay que volar el lago unos 180 m; por la derecha es más seguro pero más largo. Calle angosta entre árboles.",
+    pin:[2,533], green:{c:[1,532], rx:12, rz:15, rot:-5},
+    center:[[0,0],[6,190],[-2,360],[2,533]],
+    fairways:[{pts:[[12,150],[4,250],[-3,360],[-1,450],[1,505]], w:15}],
+    water:[{kind:"pond", pts:[[-6,55],[-3,120],[-8,182],[-30,192],[-62,175],[-72,110],[-55,52],[-25,40]]}],
+    bunkers:[{c:[-13,525], rx:3.5, rz:6}, {c:[13,540], rx:3, rz:5}, {c:[16,262], rx:4, rz:9}],
+    route:[[10,215],[-2,400]], corridor:60 },
+  { num:14, name:"El lago del green", par:4, yards:382,
+    tip:"Par 4 con agua a la izquierda a unos 270 m de la salida, frente al green. Si fallas, que sea a la derecha.",
+    pin:[7,346], green:{c:[6,347], rx:12, rz:13},
+    center:[[0,0],[2,200],[7,346]],
+    fairways:[{pts:[[1,40],[2,180],[5,255]], w:15}, {pts:[[8,290],[7,328]], w:11}],
+    water:[{kind:"pond", pts:[[-55,250],[-14,262],[-6,292],[-9,326],[-30,336],[-62,315],[-70,270]]}],
+    bunkers:[{c:[19,348], rx:3, rz:6}, {c:[2,362], rx:6, rz:2.5}],
+    route:[[3,225]], corridor:60 },
+  { num:18, name:"Regreso a la casa club", par:5, yards:551,
+    tip:"Fuera de límites por toda la izquierda. A unos 120 m del green empieza un lago por la derecha que abraza el green; un bunker separa el green del agua.",
+    pin:[-3,503], green:{c:[-3,503], rx:11, rz:14},
+    center:[[0,0],[-2,250],[0,390],[-3,503]],
+    fairways:[{pts:[[-2,40],[-2,250],[0,370],[-3,470]], w:17}],
+    water:[{kind:"pond", pts:[[22,385],[17,440],[13,478],[13,505],[17,524],[45,530],[70,470],[65,385]]}],
+    bunkers:[{c:[10.5,500], rx:2.3, rz:8}, {c:[-15,510], rx:3, rz:5}],
+    obSide:[{side:"L", off:30, from:-10, to:600}],
+    buildings:[{c:[-8,578], w:70, d:26, h:12, color:0xf1ece2, roofColor:0xb5653b}],
+    route:[[-2,240],[-4,410]], corridor:60 }
+];
+// TPC Cartagena at Karibana (Jack Nicklaus): los tres últimos hoyos junto al mar Caribe
+const TPCC = [
+  { num:16, name:"Junto al Caribe", par:4, yards:467,
+    tip:"Par 4 largo con el mar Caribe por toda la derecha y playa antes del agua. La brisa del mar empuja la bola: busca el lado izquierdo de la calle.",
+    pin:[-1,427], green:{c:[-1,427], rx:13, rz:14},
+    center:[[0,0],[-5,200],[-1,427]],
+    fairways:[{pts:[[-2,40],[-5,200],[-3,330],[-1,400]], w:18}],
+    water:[{kind:"ocean", beach:12, rocks:false, shore:7, pts:[[48,-40],[42,100],[44,220],[40,330],[34,400],[33,445],[38,520],
+      [38,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-OCEAN_FAR],[48,-OCEAN_FAR]]}],
+    bunkers:[{c:[-15,416], rx:5, rz:3}, {c:[13,433], rx:2.5, rz:6}],
+    route:[[-4,215]], corridor:75 },
+  { num:17, name:"El corto del Caribe", par:3, yards:127,
+    tip:"Par 3 corto pero lleno de problemas: bunkers alrededor y la playa con el mar a la derecha y detrás. Con viento cruzado, apunta al centro del green.",
+    pin:[-3,116], green:{c:[-3,116], rx:11, rz:10},
+    center:[[0,0],[-3,116]],
+    fairways:[{pts:[[-2,78],[-3,101]], w:8}],
+    bunkers:[{c:[-2,103], rx:7, rz:2.4}, {c:[-15,115], rx:3, rz:6}, {c:[8,126], rx:4, rz:3}],
+    water:[{kind:"ocean", beach:10, rocks:false, shore:7, pts:[[45,-40],[36,50],[24,105],[16,135],[-15,146],[-60,150],[-120,160],
+      [-OCEAN_FAR,160],[-OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-40]]}],
+    corridor:65 },
+  { num:18, name:"Riesgo y premio", par:5, yards:496,
+    tip:"Par 5 de riesgo y premio: una laguna a la izquierda está en juego en la segunda y en el acercamiento, y protege el frente del green. El mar sigue a la derecha.",
+    pin:[-22,452], green:{c:[-22,452], rx:12, rz:13, rot:20},
+    center:[[0,0],[3,230],[-2,360],[-22,452]],
+    fairways:[{pts:[[1,40],[3,230],[3,330],[2,380]], w:16}, {pts:[[-13,420],[-18,438]], w:9}],
+    water:[{kind:"pond", edge:"wood", pts:[[-14,300],[-12,350],[-16,392],[-24,422],[-40,430],[-62,420],[-72,350],[-50,295]]},
+           {kind:"ocean", beach:12, rocks:false, shore:4, pts:[[62,-60],[56,200],[58,420],[44,560],[44,OCEAN_FAR],[OCEAN_FAR,OCEAN_FAR],[OCEAN_FAR,-OCEAN_FAR],[62,-OCEAN_FAR]]}],
+    bunkers:[{c:[-6,455], rx:3, rz:6}, {c:[-30,468], rx:5, rz:2.5}],
+    buildings:[{c:[-25,515], w:60, d:22, h:10, color:0xf4efe6, roofColor:0xc0703f}],
+    route:[[3,235],[2,370]], corridor:75 }
+];
 // el campo ficticio original (mismas posiciones que antes)
 const CLASSIC = [
   { num:1, name:"El Guayacán", par:4, tip:"Par 4 recto con bunkers a la izquierda de la calle y a la derecha del green.",
@@ -249,20 +311,26 @@ const CLASSIC = [
     bunkers:[{c:[21,250], rx:10}, {c:[-13,458], rx:7}], water:[{pts:[[-58,280],[-22,280],[-22,400],[-58,400]]}], route:[[4,240]], corridor:62 }
 ];
 const COURSES = [
-  { id:"standrews", name:"Old Course", place:"St Andrews, Escocia", style:"Links",
+  { id:"standrews", name:"Old Course", place:"St Andrews, Escocia", style:"Links", si:0, alt:0, wind:[2,7],
     desc:"Links junto al mar: calles enormes y sin árboles (solo tojo), el Swilcan Burn, los galpones del hotel en el 17 y el pueblo a la derecha del 18.",
     flora:{kinds:[["gorse",1]], dens:.45, gap:22, spread:34, rows:2, far:90}, holes:OLD },
-  { id:"pebble", name:"Pebble Beach", place:"California, EE. UU.", style:"Acantilados",
+  { id:"pebble", name:"Pebble Beach", place:"California, EE. UU.", style:"Acantilados", si:1, alt:0, wind:[1,6],
     desc:"El Pacífico en juego: un par 3 cuesta abajo hacia el mar, un segundo golpe sobre el abismo y un par 5 con el océano por toda la izquierda.",
     flora:{kinds:[["cypress",.65],["cone",.35]], dens:.45, gap:22, spread:30, rows:1, far:55}, holes:PEB },
-  { id:"sawgrass", name:"TPC Sawgrass", place:"Florida, EE. UU.", style:"Agua",
+  { id:"sawgrass", name:"TPC Sawgrass", place:"Florida, EE. UU.", style:"Agua", si:2, alt:0, wind:[0,5],
     desc:"El final del Stadium Course: par 5 con agua a la derecha, el green isla del 17 y el 18 con agua por toda la izquierda.",
     flora:{kinds:[["cone",.55],["palm",.2],["round",.25]], dens:.9, gap:18, spread:24, rows:2, far:70}, holes:SAW },
-  { id:"swinglab", name:"Swing Lab", place:"Campo ficticio", style:"Clásico",
+  { id:"bogota", name:"Country Club de Bogotá", place:"Los Fundadores · Bogotá, 2.600 m", style:"Altura", si:4, alt:2600, wind:[0,3],
+    desc:"Cancha Los Fundadores: calles angostas entre árboles, lagos en juego en el 13, el 14 y el 18, y la altura de Bogotá: la bola vuela cerca de 10% más.",
+    flora:{kinds:[["round",.55],["cone",.45]], dens:.95, gap:15, spread:20, rows:2, far:80}, holes:CCB },
+  { id:"cartagena", name:"TPC Cartagena", place:"Karibana · Cartagena, Colombia", style:"Caribe", si:5, alt:0, wind:[3,8],
+    desc:"Diseño de Jack Nicklaus junto al mar Caribe: el 16 con el mar por toda la derecha, el 17 corto y lleno de problemas y el 18, un par 5 de riesgo y premio con laguna. Siempre hay brisa.",
+    flora:{kinds:[["palm",.6],["round",.4]], dens:.55, gap:22, spread:28, rows:1, far:60}, holes:TPCC },
+  { id:"swinglab", name:"Swing Lab", place:"Campo ficticio", style:"Clásico", si:3, alt:0,
     desc:"El campo original de la app: par 4 con bunkers, par 3 con laguna delante y par 5 con lago a la izquierda.",
     flora:{kinds:[["round",.72],["cone",.28]], dens:.8, gap:20, spread:26, rows:1, far:70}, holes:CLASSIC }
 ];
-COURSES.forEach((c,ci)=>{ c.holes=c.holes.map((d,i)=>build(d, ci*10+i, c.flora)); c.par=c.holes.reduce((a,h)=>a+h.par,0); });
+COURSES.forEach((c,ci)=>{ c.holes=c.holes.map((d,i)=>build(d, (c.si??ci)*10+i, c.flora)); c.par=c.holes.reduce((a,h)=>a+h.par,0); });
 SL.COURSES = COURSES;
 SL.courseById = id=>COURSES.find(c=>c.id===id)||COURSES[0];
 SL.HOLES = SL.courseById("swinglab").holes;
