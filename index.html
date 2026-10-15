@@ -50,7 +50,7 @@ h1 span{color:var(--accent)}
 .pill.ready{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
 .pill.wait{color:var(--warn);border-color:var(--warn)}
 
-.modes{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.modes{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
 .mode{appearance:none;border:0;background:none;padding:10px 6px;font:700 1.05rem var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);cursor:pointer}
 .mode[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 
@@ -101,6 +101,19 @@ h1 span{color:var(--accent)}
 .clubs::-webkit-scrollbar{display:none}
 .clubs .chip{flex:0 0 auto;min-width:76px;scroll-snap-align:center}
 #swingViz{height:190px}
+/* cámara: pequeña sobre el campo (para ver el campo y apuntar) o en grande */
+.view.pipOn .holeTip{left:calc(min(30%,138px) + 20px);top:118px}
+.view.pipOn .hudMsg:not(.hint){left:auto;right:10px;transform:none;max-width:calc(100% - min(30%,138px) - 30px)}
+.camBox{position:absolute;z-index:4;overflow:hidden;background:#000;cursor:pointer}
+.camBox.big{inset:0}
+.camBox.pip{left:10px;top:78px;width:min(30%,138px);aspect-ratio:3/4;border-radius:12px;border:2px solid rgba(255,255,255,.9);box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.camBox.pip.ready{border-color:#7dff9a;box-shadow:0 0 0 3px rgba(125,255,154,.45),0 6px 18px rgba(0,0,0,.35)}
+.camBox.paused video{filter:grayscale(1) brightness(.55)}
+.camBtns{position:absolute;right:4px;top:4px;display:flex;gap:4px;z-index:3}
+.camBtns button{appearance:none;width:30px;height:30px;border-radius:50%;border:0;background:rgba(8,24,18,.78);color:#fff;font-size:.85rem;line-height:1;cursor:pointer;padding:0}
+.camBox.big .camBtns{top:auto;bottom:12px;right:12px;gap:8px}
+.camBox.big .camBtns button{width:44px;height:44px;font-size:1.1rem}
+.camBox.pip .camMsg{top:auto;bottom:0;left:0;right:0;transform:none;font:700 .66rem/1.15 var(--body);letter-spacing:0;text-transform:none;padding:5px 4px;background:rgba(8,24,18,.72)}
 #camVideo,#camCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border:0;border-radius:0;background:#000}
 #camCanvas{background:transparent;pointer-events:none}
 #camCanvas.replay{background:#081812}
@@ -159,6 +172,21 @@ canvas.plot{width:100%;display:block;border:1px solid var(--line);border-radius:
 .kpis span{display:block;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .kpis strong{font:700 1.3rem var(--display);font-variant-numeric:tabular-nums}
 .tablebox{overflow-x:auto}
+body.m-rank .board,body.m-rank .inputRow,body.m-rank #camHelp,body.m-rank .actions,body.m-rank #msg,body.m-rank #live,body.m-rank #clubRow{display:none}
+.players{display:flex;flex-wrap:wrap;gap:6px}
+.pchip{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:99px;padding:7px 12px;font:600 .9rem var(--body);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.pchip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.pchip .x{opacity:.6;font-weight:400}
+.addP{display:flex;gap:6px;align-items:center}
+.addP input{flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:400 .95rem var(--body)}
+.rankTabs{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+table.rank td:first-child{font-weight:700;width:2.2em}
+table.rank tr.me td{color:var(--accent);font-weight:600}
+.podium{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.podium div{border:1px solid var(--line);border-radius:12px;padding:9px 11px;background:var(--surface);min-width:0}
+.podium span{display:block;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.podium strong{display:block;font:700 1.35rem/1.15 var(--display)}
+.podium small{display:block;color:var(--muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .coursePick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .cp{appearance:none;position:relative;text-align:left;display:flex;flex-direction:column;gap:2px;padding:10px 12px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:400 .85rem/1.25 var(--body);cursor:pointer;min-width:0}
 .cp b{font:700 1.05rem/1.15 var(--display);letter-spacing:.02em;padding-right:52px}
@@ -199,6 +227,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="mode" data-mode="range" aria-pressed="true">Range</button>
     <button class="mode" data-mode="course" aria-pressed="false">Campo</button>
     <button class="mode" data-mode="data" aria-pressed="false">Datos</button>
+    <button class="mode" data-mode="rank" aria-pressed="false">Ranking</button>
   </nav>
 
   <div class="view" id="view">
@@ -211,9 +240,12 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="holeTip" id="holeTip" hidden></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
-    <video id="camVideo" playsinline muted hidden></video>
-    <canvas id="camCanvas" hidden></canvas>
-    <div class="camMsg" id="camMsg" hidden></div>
+    <div class="camBox pip" id="camBox" hidden>
+      <video id="camVideo" playsinline muted></video>
+      <canvas id="camCanvas"></canvas>
+      <div class="camMsg" id="camMsg" hidden></div>
+      <div class="camBtns"><button id="camPause" aria-label="Pausar la lectura">⏸</button><button id="camSize" aria-label="Agrandar la cámara">⤢</button></div>
+    </div>
     <button class="replayBtn" id="replayBtn" hidden>▶ Repetición</button>
     <div class="aimBar" id="aimBar" hidden>
       <button id="aimL" aria-label="Apuntar más a la izquierda">◀</button>
@@ -251,7 +283,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <span class="lab2">Medir con</span>
     <div class="seg big" id="inputSeg" role="group" aria-label="Forma de medir"><button data-i="sensor" aria-pressed="true">Sensor del teléfono</button><button data-i="camera" aria-pressed="false">Cámara</button></div>
   </div>
-  <p class="note" id="camHelp" hidden>Apoya el teléfono a 2 o 3 metros, de frente a ti y a la altura de tu cintura, con todo tu cuerpo en la imagen. Puedes hacer el swing con las manos vacías, con un palo o con algo que lo simule. Para medir mejor: mucha luz (mejor de día o con la luz a tu frente), ropa que contraste con el fondo y el teléfono bien quieto. Elige el palo antes de cada swing: la velocidad del palo sale de la de tus manos según el largo de ese palo.</p>
+  <p class="note" id="camHelp" hidden>Apoya el teléfono a 2 o 3 metros, de frente a ti y a la altura de tu cintura, con todo tu cuerpo en la imagen. Puedes hacer el swing con las manos vacías, con un palo o con algo que lo simule. Para medir mejor: mucha luz (mejor de día o con la luz a tu frente), ropa que contraste con el fondo y el teléfono bien quieto. Elige el palo antes de cada swing: la velocidad del palo sale de la de tus manos según el largo de ese palo. La cámara aparece en pequeño sobre el campo para que veas a dónde apuntas: tócala o usa ⤢ para agrandarla. Mientras apuntas no se leen swings; al tocar <b>Listo</b> tienes unos segundos para ponerte en posición. Con ⏸ pausas la lectura cuando quieras.</p>
   <div class="actions">
     <button class="go" id="go">Activar sensores</button>
     <button class="test" id="testShot">Golpe de prueba</button>
@@ -270,6 +302,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="row">
       <button class="ghost primary" id="nextHole" hidden>Siguiente hoyo</button>
       <button class="ghost" id="newRound">Nueva ronda</button>
+      <button class="ghost" id="toRank">🏆 Ranking</button>
     </div>
     <p class="note" id="courseNote"></p>
     <p class="note">Los hoyos están inspirados en los reales: misma distancia y forma, y las trampas (agua, bunkers, fuera de límites, árboles) en su lugar. El objetivo automático sigue la ruta del hoyo: si el green no está a tu alcance, apunta a la zona de aterrizaje. Puedes cambiarlo tocando el pasto; <b>Auto</b> lo devuelve. A menos de 40 m del objetivo el golpe es un <b>chip asistido</b>: un swing suave no se mide bien, así que la distancia se ajusta al objetivo y tu cara y tu ruta deciden la dirección.</p>
@@ -277,6 +310,24 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 
   <section data-for="range">
     <p class="note"><b>Apunta como en TrackMan:</b> toca el pasto donde quieres que caiga la bola, o toca <b>🎯 Apuntar</b> para elegirlo desde arriba. Con ◀ ▶ afinas la dirección. Cada tiro te dice a cuánto quedaste del objetivo. Las banderas marcan la distancia y cada tiro deja su marca para que veas tu dispersión. Si no tienes los sensores a mano, usa <b>Golpe de prueba</b>.</p>
+  </section>
+
+  <section data-for="rank" hidden>
+    <h2>Quién juega</h2>
+    <div class="players" id="players" role="group" aria-label="Jugadores"></div>
+    <div class="addP"><input id="newPlayer" maxlength="18" placeholder="Nombre de otro jugador" autocomplete="off"><button class="ghost" id="addPlayer">Agregar</button></div>
+    <p class="note">Cada jugador lleva su propia ronda en cada campo: pueden turnarse hoyo a hoyo en el mismo teléfono cambiando de jugador aquí.</p>
+    <h2>Récords</h2>
+    <div class="podium" id="podium"></div>
+    <h2>Ranking</h2>
+    <div class="rankTabs" id="rankTabs" role="tablist"></div>
+    <div class="tablebox"><table class="rank"><thead id="rankHead"></thead><tbody id="rankBody"></tbody></table></div>
+    <p class="note" id="rankNote"></p>
+    <div class="row">
+      <button class="ghost primary" id="rankShare">Compartir</button>
+      <button class="ghost" id="rankClear">Borrar ranking</button>
+    </div>
+    <p class="note" id="rankClearConfirm" hidden>¿Borrar todo el ranking? <button class="ghost" id="rankClearYes">Sí, borrar</button> <button class="ghost" id="rankClearNo">Cancelar</button></p>
   </section>
 
   <section data-for="data" hidden>
@@ -403,10 +454,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.9"></script>
-<script src="js/courses.js?v=0.9"></script>
-<script src="js/world3d.js?v=0.9"></script>
-<script src="js/camera.js?v=0.9"></script>
-<script src="js/app.js?v=0.9"></script>
+<script src="js/engine.js?v=0.10"></script>
+<script src="js/courses.js?v=0.10"></script>
+<script src="js/world3d.js?v=0.10"></script>
+<script src="js/camera.js?v=0.10"></script>
+<script src="js/app.js?v=0.10"></script>
 </body>
 </html>

@@ -2,23 +2,29 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.9";
+const VERSION="0.10";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
 const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
-let mode=store.get("sl3_mode","range"); if(!["range","course","data"].includes(mode)) mode="range";
+let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
 let myCarry=store.get("sl5_mycarry",{});
 let history=store.get("sl2_hist",[]), traces=store.get("sl2_traces",[]), records=store.get("sl2_records",{});
 let rangeMarks=store.get("sl3_rangeMarks",[]);
 // campos: cada uno guarda su propia ronda en curso
+// jugadores: varios pueden turnarse en el mismo teléfono; cada uno con su ronda en cada campo
+let players=store.get("sl10_players",null); if(!Array.isArray(players)||!players.length) players=["Yo"];
+if(!S.player || !players.includes(S.player)) S.player=players[0];
 let rounds=store.get("sl8_rounds",null); if(!rounds){ rounds={}; const old=store.get("sl4_course",null); if(old) rounds.swinglab=old; }
+for(const k of Object.keys(rounds)) if(!k.includes("|")){ rounds[k+"|"+players[0]]=rounds[k]; delete rounds[k]; }
+const roundKey=(cid=courseId,p=S.player)=>cid+"|"+p;
 let courseId=store.get("sl8_courseId","standrews"), CUR=SL.courseById(courseId); courseId=CUR.id;
 let HOLES=CUR.holes;
 const validRound=c=>c && c.hole>=0 && c.hole<HOLES.length && Array.isArray(c.wind) && c.wind.length===HOLES.length;
-let course=validRound(rounds[courseId])?rounds[courseId]:null;
+let course=validRound(rounds[roundKey()])?rounds[roundKey()]:null;
+let board=Object.assign({rounds:[],drives:[],speeds:[],prox:[]}, store.get("sl10_board",{}));
 let shown=null, lastReal=null, suggested=null, has3D=false;
 const saveSettings=()=>store.set("sl2_settings",S);
 const launch=(c,ms,h,lie)=>SL.launchFor(c,ms,h,lie,S.hand);
@@ -116,10 +122,12 @@ function setAim(p,quiet){
 function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="";
   if(mode==="course"&&course){ const h=HOLES[course.hole], q=aimPoint(); side=Math.hypot(q.x-h.pinX,q.z-h.L)<1?" · al hoyo":course.aim?"":" · ruta"; }
   $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`; $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
-  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || (mode==="course"&&course&&(course.holed||course.done)) || (S.input==="camera" && SL.Cam.on && !$("camVideo").hidden); void o; void p; }
+  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig(); void o; void p; }
 function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
   setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
 function toggleAimView(on){ aimMode=on; const o=aimOrigin(), p=aimPoint();
+  // con la cámara: mientras apuntas no se lee el swing; al terminar tienes unos segundos para ponerte en posición
+  if(camState==="on" && !camHold){ if(on){ SL.Cam.pause(true); SL.Cam.flash("En pausa mientras apuntas","wait",1e7); } else { SL.Cam.flash("",null,0); SL.Cam.pause(false,4000,"Ponte en posición"); say("Ponte en posición."); } camBig=false; camLayer(true,on); }
   if(on){ const d=mode==="course"&&course ? Math.max(60,Math.hypot(HOLES[course.hole].pinX-o.x,HOLES[course.hole].L-o.z)) : 290, span=d*1.3;
     const yaw=aimYaw(), c={x:o.x+Math.sin(yaw)*d*0.6, z:o.z+Math.cos(yaw)*d*0.6}; World.aimView(true,{x:c.x,z:c.z,span});
     setHudMsg("Toca donde quieres que caiga la bola"); $("hudMsg").classList.add("hint"); $("card").hidden=true; $("holeTip").hidden=true; }
@@ -134,10 +142,12 @@ function rangeShot(h){
   if(aimMode) toggleAimView(false);
   const yaw=yawTo({x:0,z:0},rangeAim), pts=toWorld(sim.pts,0,0,yaw), seq=++shotSeq, fin=pts[pts.length-1], toT=Math.hypot(fin.x-rangeAim.x,fin.z-rangeAim.z);
   sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
-  camLayer(false);
+  camShot();
   World.playShot({pts, landT:sim.landT, onLand:sfx.land, onEnd:()=>{
     $("skip").hidden=true; rangeMarks.push({x:+fin.x.toFixed(1),z:+fin.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
-    if(!h.sim){ rangeProx.push(+toT.toFixed(1)); rangeProx=rangeProx.slice(-30); store.set("sl7_rangeProx",rangeProx); }
+    if(!h.sim){ rangeProx.push(+toT.toFixed(1)); rangeProx=rangeProx.slice(-30); store.set("sl7_rangeProx",rangeProx);
+      const td=Math.hypot(rangeAim.x,rangeAim.z); if(td>=40) addEntry("prox",{v:+toT.toFixed(1), t:+td.toFixed(0), club:h.club});
+      if(h.club==="driver") addEntry("drives",{v:+Math.hypot(fin.x,fin.z).toFixed(1), c:"range"}); }
     World.setMarks(rangeMarks); showCard(sim,toT); renderHud(); const sh=shapeName(h); setHudMsg(`A ${fmtDist(toT)} del objetivo`+(sh?` · ${sh}`:""));
     say(`A ${sayDist(toT)} del objetivo.`);
     setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range"){ World.address(0,0,yawTo({x:0,z:0},rangeAim),true); camLayer(true); setHudMsg(null); $("card").hidden=true; renderAim(); } },3800); }});
@@ -145,7 +155,7 @@ function rangeShot(h){
 
 // ================= Campo =================
 const newWind=()=>{ const s=Math.random()<0.25?0:1+Math.random()*4.5, a=Math.random()*Math.PI*2; return {s, x:Math.sin(a)*s, z:Math.cos(a)*s}; };
-const saveCourse=()=>{ if(course) rounds[courseId]=course; else delete rounds[courseId]; store.set("sl8_rounds",rounds); };
+const saveCourse=()=>{ if(course) rounds[roundKey()]=course; else delete rounds[roundKey()]; store.set("sl8_rounds",rounds); };
 const recKey=()=>"c_"+courseId, recOf=id=>records["c_"+id] ?? (id==="swinglab"?records.course:null) ?? null;
 function newRound(){ course={courseId, hole:0, ball:{x:0,z:0}, lie:"tee", strokes:0, scores:[], lines:[], wind:HOLES.map(newWind), holed:false, done:false};
   saveCourse(); setupHole(true); renderScore(); renderCourses(); }
@@ -195,7 +205,9 @@ const RESULT={"-3":"¡Albatros!","-2":"¡Eagle!","-1":"Birdie","0":"Par","1":"Bo
 function finishHole(text,voice){
   course.holed=true; course.scores[course.hole]=course.strokes; course.auto=null;
   if(course.hole===HOLES.length-1){ course.done=true; const tot=course.scores.reduce((a,b)=>a+b,0), par=CUR.par, dd=tot-par, rec=recOf(courseId);
-    if(rec==null || tot<rec){ records[recKey()]=tot; store.set("sl2_records",records); voice+=" ¡Nuevo récord en "+CUR.name+"!"; }
+    if(!course.sim && (rec==null || tot<rec)){ records[recKey()]=tot; store.set("sl2_records",records); voice+=" ¡Nuevo récord en "+CUR.name+"!"; }
+    if(course.sim) text+=" · con golpes de prueba: no entra al ranking";
+    else { const pos=addEntry("rounds",{v:tot, d:tot-par, c:courseId, sc:course.scores.slice()}); if(pos===1) voice+=" ¡Primer lugar del ranking!"; else if(pos<=3) voice+=` Quedas ${pos}º en el ranking.`; }
     voice+=` Ronda terminada: ${tot} golpes, ${dd===0?"par del campo":dd>0?dd+" sobre par":(-dd)+" bajo par"}.`; }
   setHudMsg(text); say(voice); saveCourse(); renderHud(); renderScore(); renderCourses();
   const seq=shotSeq; if(!course.done) setTimeout(()=>{ if(seq===shotSeq && course.holed && !course.done) nextHole(); },6500);
@@ -208,6 +220,7 @@ function courseShot(h){
   if(course.holed) nextHole();
   if(aimMode) toggleAimView(false);
   const hole=HOLES[course.hole], yaw=aimYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole], tgt=aimPoint();
+  if(h.sim) course.sim=true;
   const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw), windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
   const toLocal=(x,z)=>[r[0]*(x-ox)+r[1]*(z-oz), f[0]*(x-ox)+f[1]*(z-oz)];
   // Golpe corto asistido: cerca del green el sensor no mide bien un swing tan suave,
@@ -228,7 +241,7 @@ function courseShot(h){
   if(endLie==="water" && !SL.waterAt(hole,wx,wz)){ wx=fx; wz=fz; }
   const line=pts.filter(p=>p.t<=landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
   const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("holeTip").hidden=true; $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
-  camLayer(false);
+  camShot();
   World.playShot({pts, landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
     $("skip").hidden=true; showCard(card, Math.hypot(fx-tgt.x,fz-tgt.z));
     course.lines.push(line); World.setLines(course.lines);
@@ -243,6 +256,7 @@ function courseShot(h){
       saveCourse(); renderHud(); renderScore(); drawMini(); suggestClub();
       setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },2800); return;
     }
+    if(!h.sim && h.club==="driver") addEntry("drives",{v:+Math.hypot(fx-ox,fz-oz).toFixed(1), c:courseId});
     course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; course.aim=null; drawMini();
     if(Math.hypot(tgt.x-hole.pinX,tgt.z-hole.L)>1) setTimeout(()=>{ if(seq===shotSeq) say(`A ${sayDist(Math.hypot(fx-tgt.x,fz-tgt.z))} del objetivo.`); },2200);
     const d=distToPin();
@@ -274,7 +288,7 @@ function renderHud(){
   const h=HOLES[course.hole], w=course.wind[course.hole], d=distToPin();
   $("hudL").innerHTML=`<b>Hoyo ${h.num} · Par ${h.par}</b>${CUR.name} · ${course.holed?"terminado":"faltan "+fmtDist(d)}`;
   const tot=course.scores.reduce((a,b,i)=>a+(b||0)-(b?HOLES[i].par:0),0); R.hidden=false;
-  R.innerHTML=`<b>${course.holed?course.strokes+" golpes":"Golpe "+(course.strokes+1)}</b>${w.s>0.3?"Viento "+w.s.toFixed(0)+" m/s "+windArrow(w):"Sin viento"}<br>Ronda: ${tot===0?"par":tot>0?"+"+tot:tot}`;
+  R.innerHTML=`<b>${players.length>1?S.player.replace(/</g,"&lt;")+" · ":""}${course.holed?course.strokes+" golpes":"Golpe "+(course.strokes+1)}</b>${w.s>0.3?"Viento "+w.s.toFixed(0)+" m/s "+windArrow(w):"Sin viento"}<br>Ronda: ${tot===0?"par":tot>0?"+"+tot:tot}`;
 }
 function windArrow(w){ if(!course) return ""; const rel=aimYaw()-Math.atan2(w.x,w.z), a=((rel/DEG)%360+360)%360;
   return ["↑","↗","→","↘","↓","↙","←","↖"][Math.round(a/45)%8]; }
@@ -291,14 +305,14 @@ function renderScore(){
 }
 // Selector de campo
 function renderCourses(){ const box=$("coursePick"); if(!box) return;
-  box.innerHTML=SL.COURSES.map(c=>{ const r=rounds[c.id], rec=recOf(c.id), playing=r && !r.done && (r.hole>0||r.strokes>0);
+  box.innerHTML=SL.COURSES.map(c=>{ const r=rounds[roundKey(c.id)], rec=recOf(c.id), playing=r && !r.done && (r.hole>0||r.strokes>0);
     return `<button class="cp" data-c="${c.id}" aria-pressed="${c.id===courseId}"><span class="cp-tag">${c.style}</span><b>${c.name}</b><span>${c.place}</span>`+
       `<small>Hoyos ${c.holes.map(h=>h.num).join(" · ")} · par ${c.par}${rec?` · récord ${rec}`:""}${playing?` · en juego (hoyo ${c.holes[r.hole].num})`:""}</small></button>`; }).join("");
   box.querySelectorAll(".cp").forEach(b=>b.addEventListener("click",()=>selectCourse(b.dataset.c))); }
 function selectCourse(id){
   if(World.busy()) return; const c=SL.courseById(id); if(c.id===courseId && course) return;
   courseId=c.id; CUR=c; HOLES=c.holes; store.set("sl8_courseId",courseId); builtHole="";
-  course=validRound(rounds[courseId])?rounds[courseId]:null; $("card").hidden=true; setHudMsg(null); if(aimMode) aimMode=false;
+  course=validRound(rounds[roundKey()])?rounds[roundKey()]:null; $("card").hidden=true; setHudMsg(null); if(aimMode) aimMode=false;
   if(mode!=="course"){ renderCourses(); renderScore(); return; }
   if(!course) newRound(); else { setupHole(true); renderScore(); }
   renderCourses(); window.scrollTo({top:0, behavior:"smooth"});
@@ -324,6 +338,73 @@ function drawMini(){
   c.fillStyle="#d8392b"; c.fillRect(X(h.pinX)-1,Y(h.L)-7,2,7);
   const b=course.ball; c.fillStyle="#fff"; c.strokeStyle="#000"; c.beginPath(); c.arc(X(b.x),Y(b.z),2.6,0,Math.PI*2); c.fill(); c.stroke();
 }
+
+// ================= Jugadores y ranking =================
+// Solo cuentan golpes reales (no los de prueba). Rondas por campo; récords de drive, velocidad y precisión.
+const RANK_CATS={ drives:{name:"Drive más largo", better:"max"}, speeds:{name:"Swing más rápido", better:"max"}, prox:{name:"Más cerca del objetivo", better:"min"} };
+function addEntry(cat, e){
+  e.p=S.player; e.at=Date.now(); const L=board[cat]; L.push(e);
+  const same=x=>cat==="rounds"?x.c===e.c:true, cmp=cat==="rounds"?(a,b)=>a.v-b.v||a.at-b.at:RANK_CATS[cat].better==="max"?(a,b)=>b.v-a.v||a.at-b.at:(a,b)=>a.v-b.v||a.at-b.at;
+  const group=L.filter(same).sort(cmp), keep=new Set(group.slice(0,50)); board[cat]=L.filter(x=>!same(x)||keep.has(x));
+  saveBoard(); const pos=group.indexOf(e)+1;
+  if(pos===1 && cat!=="rounds" && group.length>1){ const msgTxt={drives:"¡Drive más largo del ranking!",speeds:"¡Swing más rápido del ranking!",prox:"¡El más cerca del ranking!"}[cat]; setTimeout(()=>say(msgTxt),2600); }
+  return pos; }
+const saveBoard=()=>store.set("sl10_board",board);
+let rankTab=null;
+const fmtDate=t=>new Date(t).toLocaleDateString("es",{day:"numeric",month:"short"});
+const vsPar=d=>d===0?"E":d>0?"+"+d:String(d);
+function rankRows(tab){
+  if(tab.startsWith("rounds:")){ const cid=tab.slice(7), c=SL.courseById(cid);
+    return {head:["#","Jugador","Golpes","Par","Fecha"], rows:board.rounds.filter(r=>r.c===cid).sort((a,b)=>a.v-b.v||a.at-b.at).slice(0,10).map((r,i)=>[i+1,r.p,r.v,vsPar(r.d),fmtDate(r.at)]),
+      note:`${c.name}: rondas completas de ${c.holes.length} hoyos (par ${c.par}).`, share:x=>`${x[1]}: ${x[2]} golpes (${x[3]})`}; }
+  if(tab==="drives") return {head:["#","Jugador","Distancia","Dónde","Fecha"], rows:board.drives.slice().sort((a,b)=>b.v-a.v).slice(0,10).map((r,i)=>[i+1,r.p,fmtDist(r.v),r.c==="range"?"Range":SL.courseById(r.c).name,fmtDate(r.at)]),
+      note:"Distancia total (vuelo y rodado) de tus golpes reales con el driver.", share:x=>`${x[1]}: ${x[2]}`};
+  if(tab==="speeds") return {head:["#","Jugador","Velocidad","Con","Fecha"], rows:board.speeds.slice().sort((a,b)=>b.v-a.v).slice(0,10).map((r,i)=>{ const f=fmtSpeed(r.v); return [i+1,r.p,f.v+" "+f.u,r.src==="camera"?"Cámara":"Sensor",fmtDate(r.at)]; }),
+      note:"Velocidad del palo con el driver. Para comparar entre amigos, calibra con radar o con tus distancias.", share:x=>`${x[1]}: ${x[2]}`};
+  return {head:["#","Jugador","Al objetivo","Objetivo","Fecha"], rows:board.prox.slice().sort((a,b)=>a.v-b.v).slice(0,10).map((r,i)=>[i+1,r.p,fmtDist(r.v),fmtDist(r.t)+" · "+CLUBS[r.club].name,fmtDate(r.at)]),
+      note:"En el range, a qué distancia quedó la bola del objetivo que elegiste (desde 40 m).", share:x=>`${x[1]}: ${x[2]} de un objetivo a ${x[3]}`};
+}
+function renderPlayers(){
+  $("players").innerHTML=players.map(p=>`<button class="pchip" data-p="${encodeURIComponent(p)}" aria-pressed="${p===S.player}">${p.replace(/</g,"&lt;")}${players.length>1?`<span class="x" data-del="1" aria-label="Quitar">×</span>`:""}</button>`).join("");
+  $("players").querySelectorAll(".pchip").forEach(b=>b.addEventListener("click",e=>{ const p=decodeURIComponent(b.dataset.p);
+    if(e.target.dataset.del){ players=players.filter(x=>x!==p); if(!players.length) players=["Yo"]; if(S.player===p) setPlayer(players[0]); store.set("sl10_players",players); renderRank(); return; }
+    setPlayer(p); })); }
+function setPlayer(p){ if(p===S.player) return; S.player=p; saveSettings(); builtHole="";
+  course=validRound(rounds[roundKey()])?rounds[roundKey()]:null;
+  if(mode==="course"){ if(!course) newRound(); else setupHole(true); }
+  renderRank(); renderCourses(); renderScore(); say(`Juega ${p}.`); }
+$("addPlayer").addEventListener("click",()=>{ const v=$("newPlayer").value.trim().slice(0,18); if(!v) return;
+  if(!players.includes(v)){ players.push(v); store.set("sl10_players",players); } $("newPlayer").value=""; setPlayer(v); renderRank(); });
+$("newPlayer").addEventListener("keydown",e=>{ if(e.key==="Enter") $("addPlayer").click(); });
+function renderRank(){
+  renderPlayers();
+  // récords en tarjetas
+  const best=(L,f)=>L.length?L.reduce((a,b)=>f(b,a)?b:a):null;
+  const r=best(board.rounds,(a,b)=>a.d<b.d||(a.d===b.d&&a.at<b.at)), dr=best(board.drives,(a,b)=>a.v>b.v), sp=best(board.speeds,(a,b)=>a.v>b.v), px=best(board.prox,(a,b)=>a.v<b.v);
+  const tile=(lab,val,sub)=>`<div><span>${lab}</span><strong>${val}</strong><small>${sub}</small></div>`;
+  $("podium").innerHTML=tile("Mejor ronda", r?vsPar(r.d):"—", r?`${r.p} · ${SL.courseById(r.c).name}`:"Termina una ronda")+
+    tile("Drive más largo", dr?fmtDist(dr.v):"—", dr?dr.p:"Pega con el driver")+
+    tile("Swing más rápido", sp?fmtSpeed(sp.v).v+" "+fmtSpeed(sp.v).u:"—", sp?`${sp.p} · driver`:"Mide un swing con el driver")+
+    tile("Más cerca", px?fmtDist(px.v):"—", px?`${px.p} · range`:"Apunta en el range");
+  const tabs=SL.COURSES.map(c=>["rounds:"+c.id, c.name]).concat([["drives","Drive"],["speeds","Velocidad"],["prox","Precisión"]]);
+  if(!rankTab) rankTab="rounds:"+courseId;
+  $("rankTabs").innerHTML=tabs.map(([k,n])=>`<button class="pchip" data-t="${k}" aria-pressed="${k===rankTab}">${n}</button>`).join("");
+  $("rankTabs").querySelectorAll(".pchip").forEach(b=>b.addEventListener("click",()=>{ rankTab=b.dataset.t; renderRank(); }));
+  const R=rankRows(rankTab);
+  $("rankHead").innerHTML="<tr>"+R.head.map(h=>`<th>${h}</th>`).join("")+"</tr>";
+  $("rankBody").innerHTML=R.rows.length?R.rows.map(x=>`<tr class="${x[1]===S.player?"me":""}">`+x.map(v=>`<td>${String(v).replace(/</g,"&lt;")}</td>`).join("")+"</tr>").join("")
+    :`<tr><td colspan="${R.head.length}" class="note">Aún no hay registros. Los golpes de prueba no cuentan.</td></tr>`;
+  $("rankNote").textContent=R.note;
+}
+$("rankShare").addEventListener("click",async()=>{ const R=rankRows(rankTab), t=$("rankTabs").querySelector('[aria-pressed="true"]');
+  const text=`Swing Lab · ${t?t.textContent:""}\n`+(R.rows.length?R.rows.slice(0,5).map(x=>`${x[0]}. ${R.share(x)}`).join("\n"):"Aún sin registros")+"\n¿Me superas?";
+  const url=location.href.split("#")[0];
+  try{ if(navigator.share){ await navigator.share({title:"Swing Lab · Ranking", text, url}); return; } }catch(_){ return; }
+  try{ await navigator.clipboard.writeText(text+"\n"+url); msg("Ranking copiado: pégalo en tu chat."); }catch(_){ msg(text); } });
+$("rankClear").addEventListener("click",()=>{ $("rankClearConfirm").hidden=false; });
+$("rankClearNo").addEventListener("click",()=>{ $("rankClearConfirm").hidden=true; });
+$("rankClearYes").addEventListener("click",()=>{ board={rounds:[],drives:[],speeds:[],prox:[]}; saveBoard(); $("rankClearConfirm").hidden=true; renderRank(); });
+$("toRank").addEventListener("click",()=>{ rankTab="rounds:"+courseId; setMode("rank"); window.scrollTo({top:0,behavior:"smooth"}); });
 
 // ================= Panel de datos =================
 function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
@@ -454,6 +535,7 @@ function handleResult(res){
   const {rawSamples,poseFrames,marks,...h}=res;
   if(poseFrames){ lastPose={poseFrames,marks}; $("replayBtn").hidden=false; } else if(!h.sim) { lastPose=null; $("replayBtn").hidden=true; }
   if(S.invert && !h.sim){ h.face=-h.face; h.path=-h.path; }
+  if(!h.sim && h.club==="driver") addEntry("speeds",{v:+derive(h).ms.toFixed(2), src:srcOf(h)});
   if(!h.sim){ history.unshift(h); history=history.slice(0,300); store.set("sl2_hist",history);
     traces.unshift({id:h.id, club:h.club, hz:h.hz, s:rawSamples}); traces=traces.slice(0,25); store.set("sl2_traces",traces); lastReal=h; }
   shown=h; renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawTrace(); drawField(); renderCalib(); updateLive();
@@ -537,20 +619,52 @@ async function enable(){
 async function keepAwake(){ try{ wake=await navigator.wakeLock?.request("screen"); }catch(_){} }
 // ================= Cámara =================
 let lastPose=null, camState="off";
-function camLayer(on){ const show=on && S.input==="camera" && SL.Cam.on && !SL.Cam.replaying();
-  $("camVideo").hidden=!show || !!window.__camMock; $("camCanvas").hidden=!show && !SL.Cam.replaying(); $("camMsg").hidden=!show || !$("camMsg").textContent;
-  if(show && mode==="data") $("view").hidden=false; renderAim(); }
-function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.className="camMsg "+(kind||""); m.hidden=!text || $("camVideo").hidden && !window.__camMock;
-  const st=$("status"); st.className="pill"+(kind==="ready"?" ready":kind==="bad"?" wait":" on"); if(text) st.textContent=kind==="ready"?"Listo":kind==="bad"?"Sin cuerpo":"Cámara"; }
+let camBig=false, camHold=false;
+const camIsBig=()=>S.input==="camera" && camState==="on" && !$("camBox").hidden && $("camBox").classList.contains("big");
+// La cámara va pequeña sobre el campo (ves el campo y apuntas) o en grande; en Datos siempre en grande
+function camLayer(on,noResume){
+  const box=$("camBox"), rep=SL.Cam.replaying(), show=(on!==false && S.input==="camera" && SL.Cam.on) || rep;
+  const big=rep || camBig || mode==="data" || mode==="rank" || !has3D;
+  box.hidden=!show; box.classList.toggle("big",big); box.classList.toggle("pip",!big); $("view").classList.toggle("pipOn",show && !big);
+  box.classList.toggle("paused",!!SL.Cam.paused && !rep);
+  $("camVideo").hidden=!!window.__camMock || rep; $("camCanvas").hidden=false;
+  $("camSize").hidden=mode==="data" || !has3D || rep; $("camSize").textContent=big?"▣":"⤢"; $("camSize").setAttribute("aria-label",big?"Ver el campo":"Agrandar la cámara");
+  $("camPause").hidden=rep; $("camPause").textContent=camHold?"▶":"⏸"; $("camPause").setAttribute("aria-label",camHold?"Seguir leyendo swings":"Pausar la lectura");
+  if(show && mode==="data") $("view").hidden=false;
+  // al volver al address después de un tiro, se reanuda la lectura
+  if(has3D) World.idleFps = !show || aimMode ? 0 : big ? 3 : 15;
+  if(!noResume && show && !rep && SL.Cam.paused && !camHold && !aimMode && !World.busy()){ SL.Cam.flash("",null,0); SL.Cam.pause(false,900); }
+  renderAim(); }
+// al pegar: la cámara se queda pequeña para ver el vuelo y deja de leer hasta el siguiente address
+function camShot(){ if(camState!=="on") return; SL.Cam.pause(true); SL.Cam.flash("Mira tu tiro…","wait",1e7); camBig=false; camLayer(true,true); }
+function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.className="camMsg "+(kind||""); m.hidden=!text;
+  $("camBox").classList.toggle("ready",kind==="ready");
+  const st=$("status"); st.className="pill"+(kind==="ready"?" ready":kind==="bad"?" wait":" on"); if(text) st.textContent=kind==="ready"?"Listo":kind==="bad"?"Sin cuerpo":SL.Cam.paused?"En pausa":"Cámara"; }
+$("camBox").addEventListener("click",e=>{ e.stopPropagation(); if(SL.Cam.replaying() || mode==="data" || mode==="rank" || !has3D) return; camBig=!camBig; camLayer(true); });
+$("camSize").addEventListener("click",e=>{ e.stopPropagation(); camBig=!camBig; camLayer(true); });
+$("camPause").addEventListener("click",e=>{ e.stopPropagation(); camHold=!camHold;
+  if(camHold){ SL.Cam.pause(true); SL.Cam.flash("En pausa · toca ▶ para seguir","wait",600000); }
+  else { SL.Cam.flash("",null,0); SL.Cam.pause(false,4000,"Ponte en posición"); say("Ponte en posición."); }
+  camLayer(true); });
+// un intento que no se pudo medir: aviso corto en la cámara, sin dejar la pantalla trabada
+function camError(res){
+  const soft=["slow","short","noback"].includes(res.code);
+  SL.Cam.flash(soft?"Eso no pareció un swing completo":res.error, "bad", soft?2200:4000);
+  if(!soft){ beep(220,0.2); say(res.code==="noimp"?"No vi el impacto. Termina el swing dentro de la imagen.":"No pude medir ese swing."); }
+  if(mode==="data"){ setVerdict(res.error); }
+}
 async function camStart(){
   msg(""); audio(); say(" ");
   if(window.top!==window){ msg("Dentro de Claude no se puede usar la cámara. Abre la app publicada o usa Golpe de prueba.",true); return; }
   if(!SL.Cam.supported() && !window.__camMock){ msg("Este navegador no permite usar la cámara. Prueba con Safari o Chrome.",true); return; }
   if(!has3D || mode==="data") $("view").hidden=false;
-  $("go").textContent="Iniciando cámara…"; $("go").className="go live";
-  $("camVideo").hidden=!!window.__camMock; $("camCanvas").hidden=false;
+  $("go").textContent="Iniciando cámara…"; $("go").className="go live"; camHold=false; camBig=false;
+  $("camBox").hidden=false; $("camBox").classList.add("pip"); $("camVideo").hidden=!!window.__camMock;
   const ok=await SL.Cam.start({facing:S.camFacing, model:S.camModel, onStatus:camStatus, onReady:()=>{ if(S.guide) playRhythm(); else beep(880,0.08); },
-    onSwing:frames=>{ const res=SL.analyzePose(frames, club, {grip:S.camGrip, view:S.camView}); if(!res.error){ res.model=SL.Cam.model; res.camFps=SL.Cam.camFps; } handleResult(res); }});
+    onSwing:frames=>{ if(World.busy() || aimMode) return; const res=SL.analyzePose(frames, club, {grip:S.camGrip, view:S.camView});
+      if(res.error){ camError(res); return; } res.model=SL.Cam.model; res.camFps=SL.Cam.camFps;
+      if(mode==="data"||mode==="rank"||!has3D){ SL.Cam.pause(true); setTimeout(()=>{ if(camState==="on" && !camHold) SL.Cam.pause(false,600); camLayer(true); },1800); }
+      handleResult(res); }});
   if(!ok){ camState="off"; setCamButton(); camLayer(false); return; }
   camState="on"; keepAwake(); setCamButton(); camLayer(true);
 }
@@ -565,8 +679,8 @@ function setInput(i){
   renderCalib();
 }
 document.querySelectorAll("#inputSeg button").forEach(b=>b.addEventListener("click",()=>setInput(b.dataset.i)));
-$("replayBtn").addEventListener("click",e=>{ e.stopPropagation(); if(!lastPose) return; World.skip(); $("camCanvas").hidden=false; $("camVideo").hidden=true; $("camMsg").hidden=true;
-  SL.Cam.replay(lastPose,0.3,()=>{ $("camCanvas").hidden=true; camLayer(true); }); });
+$("replayBtn").addEventListener("click",e=>{ e.stopPropagation(); if(!lastPose) return; World.skip(); const was=SL.Cam.paused; if(camState==="on") SL.Cam.pause(true);
+  $("camMsg").hidden=true; SL.Cam.replay(lastPose,0.3,()=>{ if(camState==="on" && !was && !camHold) SL.Cam.pause(false,1200); camLayer(camState==="on"); }); camLayer(true); });
 $("go").addEventListener("click",()=>{
   if(S.input==="camera"){ if(camState==="on") camStop(); else camStart(); return; }
   if(phase==="off") return enable();
@@ -602,7 +716,7 @@ function testShot(){
 $("testShot").addEventListener("click",testShot);
 $("view").addEventListener("click",e=>{
   if(World.busy()){ World.skip(); return; }
-  if(!has3D || mode==="data" || SL.Cam.replaying() || (S.input==="camera" && SL.Cam.on && !$("camVideo").hidden && !window.__camMock)) return;
+  if(!has3D || mode==="data" || mode==="rank" || SL.Cam.replaying() || camIsBig()) return;
   if(mode==="course" && course && (course.holed||course.done)) return;
   const p=World.pick(e.clientX,e.clientY); if(!p) return;
   const o=aimOrigin(); if((p.x-o.x)*Math.sin(aimYaw())+(p.z-o.z)*Math.cos(aimYaw())<3 && !aimMode) return;   // no apuntar hacia atrás
@@ -618,12 +732,15 @@ function setMode(m){
   mode=m; store.set("sl3_mode",mode);
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
-  $("view").hidden=(m==="data"||!has3D) && !(S.input==="camera" && camState==="on"); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
+  document.body.classList.toggle("m-rank",m==="rank");
+  $("view").hidden=m==="rank" || ((m==="data"||!has3D) && !(S.input==="camera" && camState==="on")); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
   $("card").hidden=true; setHudMsg(null); $("holeTip").hidden=true; $("skip").hidden=true; if(aimMode){ aimMode=false; }
-  if(has3D) World.setActive(m!=="data");
+  if(has3D) World.setActive(m!=="data" && m!=="rank");
   if(m==="range") setupRange();
   else if(m==="course"){ if(!course) newRound(); else { builtHole=""; setupHole(false); } renderCourses(); renderScore(); }
+  else if(m==="rank") renderRank();
   else { drawTrace(); drawField(); }
+  if(camState==="on"){ if(m==="rank"){ SL.Cam.pause(true); } camLayer(m!=="rank"); }
   suggestClub(); renderAll();
 }
 document.querySelectorAll(".mode").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode)));

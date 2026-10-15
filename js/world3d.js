@@ -408,7 +408,11 @@ function update(dt){
     const fd=camera.position.distanceTo(fl.position); fl.scale.setScalar(Math.max(1,fd/45)); }
 }
 
-function loop(){ requestAnimationFrame(loop); const dt=Math.min(0.05,clock.getDelta()); if(!W3.active || document.hidden) return; update(dt); R.render(scene,camera); }
+// con la cámara leyendo el swing, el campo quieto se dibuja a menos cuadros para dejarle el procesador al detector de pose
+let lastDraw=0; W3.idleFps=0;
+function loop(){ requestAnimationFrame(loop); if(!W3.active || document.hidden) return;
+  const now=performance.now(); if(W3.idleFps && !S.anim && !S.putt && now-lastDraw<1000/W3.idleFps) return;
+  lastDraw=now; const dt=Math.min(W3.idleFps?0.12:0.05,clock.getDelta()); update(dt); R.render(scene,camera); }
 W3.resize=function(){ if(!W3.ok) return; const w=canvas.clientWidth||1, h=canvas.clientHeight||1; R.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
   [trOuter,trCore,aimLine,...linePool].forEach(l=>l&&l.res(w,h)); };
 W3.setActive=function(a){ W3.active=a; if(a) W3.resize(); };
