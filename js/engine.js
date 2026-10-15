@@ -228,7 +228,7 @@ const GROUND={tee:{e:.25,mu:.25,k:1}, fairway:{e:.25,mu:.25,k:1}, rough:{e:.15,m
 // Plano D: la salida la manda sobre todo la cara; la curva, la diferencia entre cara y ruta
 SL.launchFor = function(clubKey, ms, h, lie, hand){
   const c=SL.CLUBS[clubKey], L=SL.LIES[lie]||SL.LIES.fairway, hs=hand==="L"?-1:1; h=h||{};
-  const f = h.faceOk ? clamp(h.face,-20,20) : 0, p = h.pathOk ? clamp(h.path,-15,15) : 0, aoa = h.pathOk ? clamp(h.aoa||0,-8,8) : 0;
+  const f = h.faceOk ? clamp(h.face,-20,20) : 0, p = h.pathOk ? clamp(h.path,-15,15) : 0, aoa = (h.pathOk||h.aoaOk) ? clamp(h.aoa||0,-8,8) : 0;
   const woods = clubKey==="driver"||clubKey==="wood3";
   return { v: ms*c.smash*L.speed, launch: c.launch+(lie==="rough"?1.5:0)+aoa*(woods?0.7:0.4),
            spin: c.spin*(0.6+0.4*ms/c.vref)*L.spin*Math.max(0.6,1-0.035*aoa), dir:(0.78*f+0.22*p)*hs, tilt:clamp(1.9*(f-p),-32,32)*hs };

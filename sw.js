@@ -1,6 +1,6 @@
 // Swing Lab: funciona sin conexión en el campo de práctica
-const CACHE = "swing-lab-v0.8";
-const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.8", "./js/courses.js?v=0.8", "./js/world3d.js?v=0.8", "./js/camera.js?v=0.8", "./js/app.js?v=0.8", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
+const CACHE = "swing-lab-v0.9";
+const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.9", "./js/courses.js?v=0.9", "./js/world3d.js?v=0.9", "./js/camera.js?v=0.9", "./js/app.js?v=0.9", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
