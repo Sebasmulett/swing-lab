@@ -2,6 +2,8 @@
 
 Mide la velocidad, el tempo y la ruta de tu swing de golf con el celular (sensores o cámara, de frente o desde atrás) y mira el tiro en un simulador 3D: driving range y campos completos.
 
+Con la cámara, la app usa obturador rápido donde el navegador lo permite (menos imagen corrida y más cuadros por segundo) y puede oír el impacto con el micrófono para marcarlo al milisegundo.
+
 Campos disponibles, inspirados en hoyos reales (distancias, forma y trampas en su lugar):
 
 - **Country Club de Bogotá · Los Fundadores** — 18 hoyos (a 2.600 m: la bola vuela más)

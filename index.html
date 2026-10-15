@@ -467,6 +467,10 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <select id="camView"><option value="front">De frente (mide velocidad y ataque)</option><option value="behind">Desde atrás (velocidad aproximada)</option></select>
       <label for="camModel">Detector de la cámara</label>
       <select id="camModel"><option value="auto">Automático (preciso si tu teléfono alcanza)</option><option value="full">Preciso</option><option value="lite">Rápido</option></select>
+      <label for="camSound">Oír el impacto con el micrófono</label>
+      <select id="camSound"><option value="on">Sí (impacto exacto al milisegundo)</option><option value="off">No</option></select>
+      <label for="camShutter">Obturador de la cámara</label>
+      <select id="camShutter"><option value="auto">Rápido si hay luz (menos imagen corrida)</option><option value="off">Automático del teléfono</option></select>
       <label for="voice">Leer el resultado en voz alta</label><input type="checkbox" id="voice">
       <label for="cont">Medir swing tras swing sin tocar la pantalla</label><input type="checkbox" id="cont">
     </div>
@@ -483,6 +487,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
         <li>Debajo del botón ves el giro en vivo. Empieza a media velocidad, lejos de personas, muebles y ventanas.</li>
       </ol>
       <p class="note"><b>Con la cámara:</b> apoya el teléfono a 2 o 3 metros, de frente a ti y con todo tu cuerpo en la imagen (de pies a cabeza). Activa la cámara, quédate quieto hasta que diga "Listo" y haz el swing con las manos vacías, con un palo o con algo que lo simule. La app sigue tus manos cuadro a cuadro con la hora exacta de cada uno: mide la velocidad máxima de tus manos en la bajada y la convierte en velocidad del palo según el largo de tu brazo y el del palo elegido. De frente también ve dónde está el punto más bajo de tu arco y de ahí calcula el ángulo de ataque, que cambia el vuelo según el palo (con el driver conviene pegar subiendo; con hierros y wedges, bajando). Te dice qué tan buena fue la lectura y qué mejorar. Con <b>▶ Repetición</b> ves tu swing en cámara lenta.</p>
+      <p class="note"><b>Para más precisión:</b> si el teléfono lo permite (Chrome en Android), la app usa un obturador rápido para que tus manos no salgan corridas en la foto y la cámara no baje de cuadros por segundo con poca luz. Si pegas a una bola, el micrófono oye el golpe y marca el impacto al milisegundo; los primeros 3 golpes de frente le enseñan a sincronizar el sonido con la imagen. Ambas opciones están en Ajustes.</p>
       <div class="row"><button class="ghost" id="introShow">Ver la guía rápida</button></div>
       <p class="note">Para instalarla: en iPhone, botón Compartir y luego <b>Agregar a inicio</b>. En Android, menú de Chrome y luego <b>Instalar app</b>.</p>
       <p class="note">Cómo calcula: la app sigue la orientación del teléfono desde el address. Así sabe cuándo empezó la subida, hasta dónde llegó, el instante en que el palo vuelve a la bola (impacto), hacia dónde iba la cabeza (ruta), hacia dónde apuntaba la cara y hasta dónde terminó. La velocidad sale del giro en el impacto; en modo "como si fuera el palo" se compensa que un teléfono se gira más fácil que un palo de verdad. Con eso y valores típicos de cada palo (salida, lanzamiento y spin) se simula el vuelo con aerodinámica real: arrastre, sustentación por el spin, viento, bote y rodado. Muchos teléfonos topan cerca de 2000°/s; cuando pasa, la app reconstruye el pico (~) o te avisa que es un mínimo (≥). La cara del palo es experimental.</p>
@@ -524,7 +529,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <ul class="guideList">
       <li><b>De frente</b> (lo recomendado): apoya el teléfono a 2 o 3 metros, frente a tu pecho, a la altura de la cintura y bien quieto. El objetivo queda a un lado: <span id="guideSide">a tu izquierda si eres diestro</span>.</li>
       <li>Que se vea <b>todo tu cuerpo</b>, de la cabeza a los pies, con buena luz de frente.</li>
-      <li><b>Desde atrás</b>: el teléfono detrás de ti, sobre la línea de tiro, mirando hacia el objetivo. Ve mejor la ruta del palo; la velocidad es aproximada. Cambia la vista en Ajustes.</li>
+      <li><b>Desde atrás</b>: el teléfono unos 3 metros detrás de ti, sobre la línea de tiro, a la altura de tus manos y mirando hacia el objetivo, con todo tu cuerpo en la imagen. Ve mejor la ruta del palo y tu postura; la velocidad es un poco menos exacta (mejora si la app oye el golpe). Cambia la vista en Ajustes.</li>
       <li>En la ventana de la cámara verás qué corregir y una flecha 🎯 hacia el objetivo. Cuando el borde se ponga verde, haz tu swing.</li>
     </ul>
     <div class="row"><button class="ghost primary" id="guideOk">Entendido</button></div>
@@ -544,12 +549,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.12"></script>
-<script src="js/courses.js?v=0.12"></script>
-<script src="js/world3d.js?v=0.12"></script>
-<script src="js/camera.js?v=0.12"></script>
-<script src="js/online-config.js?v=0.12"></script>
-<script src="js/online.js?v=0.12"></script>
-<script src="js/app.js?v=0.12"></script>
+<script src="js/engine.js?v=0.13"></script>
+<script src="js/courses.js?v=0.13"></script>
+<script src="js/world3d.js?v=0.13"></script>
+<script src="js/sound.js?v=0.13"></script>
+<script src="js/camera.js?v=0.13"></script>
+<script src="js/online-config.js?v=0.13"></script>
+<script src="js/online.js?v=0.13"></script>
+<script src="js/app.js?v=0.13"></script>
 </body>
 </html>

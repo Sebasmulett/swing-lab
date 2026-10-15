@@ -43,7 +43,7 @@ function localVel(T, P, tc, half, dims){
   if(idx.length<4) return null; const deg=idx.length>=6?3:2, xs=idx.map(i=>(T[i]-tc)/1000), ws=idx.map(i=>1-0.5*Math.abs(T[i]-tc)/half);
   const v=[]; for(let d=0;d<dims;d++){ const c=polyfit(xs, idx.map(i=>P[i][d]), ws, deg); if(!c) return null; v.push(c[1]); } return v;
 }
-const SINA_MIN=0.6; let DTL_K=0.8; SL._dtlK=v=>{ DTL_K=v; };
+const SINA_MIN=0.6; let DTL_K=0.8, DTL_SND=1.13, DTL_SND_B=1.01; SL._dtlK=v=>{ DTL_K=v; };
 // la profundidad 3D es ruidosa: a pocos cuadros por segundo se atenúa la ruta medida (estimador con encogimiento)
 const PATH_SHRINK=fps=>fps>=50?0.8:fps>=35?0.7:0.6; let HALF_MIN=75, HALF_K=2.05; SL._camTune=(a,b)=>{ HALF_MIN=a; HALF_K=b; };
 // pico de una curva muestreada en 15 puntos: vértice de una parábola alrededor del máximo (no el máximo crudo, que se infla con el ruido)
@@ -118,6 +118,11 @@ SL.analyzePose=function(F, clubKey, opts={}){
       const off=den>1e-6?clamp(0.5*(y0-y2)/den,-0.5,0.5):0; tImp=t[m]+off*((t[Math.min(n-1,m+1)]-t[m-1])/2); }
   } else { for(let i=top+1;i<n && t[i]-t[top]<=1200;i++) if(ang[i]<=0){ imp=i; break; }
     if(imp>0){ const fr=ang[imp-1]/((ang[imp-1]-ang[imp])||1); tImp=t[imp-1]+(t[imp]-t[imp-1])*fr; } }
+  // impacto por sonido (micrófono): si el golpe se oyó cerca de donde la imagen lo ve, manda el sonido (es exacto al milisegundo)
+  let impSrc="imagen";
+  const tA=opts.tImpact;
+  if(isFinite(tA) && tA>t[top]+80 && tA<t[top]+900 && (imp<0 || Math.abs(tA-tImp)<Math.max(110, 2.6*1000/Math.max(20,(n-1)/((t[n-1]-t[0])/1000))))){
+    tImp=tA; impSrc="sonido"; let j=top+1; while(j<n-1 && t[j]<tA) j++; imp=j; }
   if(imp<0) return {error:"No vi el impacto: termina el swing dentro de la imagen.", code:"noimp", obs:0};
   let fin=imp; for(let i=imp;i<n && t[i]-tImp<=2200;i++) if(view==="behind"?ang[i]>ang[fin]:ang[i]<ang[fin]) fin=i;
   let st=a; while(st<top && ang[st]<2*DEG) st++;
@@ -135,6 +140,13 @@ SL.analyzePose=function(F, clubKey, opts={}){
   // a pocos cuadros por segundo el ajuste local recorta un poco el pico: se compensa según los fps
   const fpsCorr=1+0.09*Math.pow(30/Math.max(20,fps),3);
   let e2dImp=(speedAt(tImp)||0)*fpsCorr; const e2dMax=peakOf(k=>speedAt(tTop+down*(0.35+0.65*k/14)))*fpsCorr;
+  // cuándo llegan las manos a su máximo: en jugadores hábiles, unos 50 ms antes del impacto (Neal et al. 2007), y luego frenan
+  // mientras el palo se suelta (en los sensores ENSO de PING, ~9-10 mph de freno en los más rápidos del tour)
+  let handPeakMs=null; { const NS=24, vals=[]; let bi=-1, bv=-1;
+    for(let k=0;k<=NS;k++){ const tc=tTop+down*0.35+(down*0.65+40)*k/NS, v=speedAt(tc); vals.push(v); if(v!=null && v>bv){ bv=v; bi=k; } }
+    if(bi>=0){ let off=0; if(bi>0 && bi<NS && vals[bi-1]!=null && vals[bi+1]!=null){ const den=vals[bi-1]-2*bv+vals[bi+1]; if(den<0) off=clamp(0.5*(vals[bi-1]-vals[bi+1])/den,-0.5,0.5); }
+      handPeakMs=Math.round(tImp-(tTop+down*0.35+(down*0.65+40)*(bi+off)/NS)); } }
+  const handDrop= view==="front" && e2dImp>0 && e2dMax>0 ? clamp(1-e2dImp/e2dMax,0,0.7) : null;
   // 2) modelo de la bajada (ángulo = θ·(1−(τ/D)^p)): la velocidad angular en el impacto
   let eModel=null; { const ps=[]; for(let i=top+1;i<imp;i++){ const u=(t[i]-tTop)/down, y=1-ang[i]/ang[top]; if(u>0.25 && u<0.97 && y>0.03 && y<0.97) ps.push(Math.log(y)/Math.log(u)); }
     const p=median(ps); if(isFinite(p) && p>1 && p<8){ const rImp=dist(Hn[Math.max(top,imp-1)],Sh[Math.max(top,imp-1)])*mPerPx; eModel=ang[top]*p/(down/1000)*rImp; } }
@@ -149,7 +161,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
     // con su ritmo en la bajada se obtiene la velocidad angular en el impacto
     let eDTL=null; { const T0=ang[top], qs=[];
       for(let i=top+1;i<imp;i++){ const u=(t[i]-tTop)/down, y=1-ang[i]/T0; if(u>0.25 && u<0.95 && y>0.03 && y<0.97) qs.push(Math.log(y)/Math.log(u)); }
-      const q=median(qs); if(isFinite(q) && q>1 && q<8 && T0>0.6) eDTL=arm*T0*q/(down/1000)*DTL_K; }
+      const q=median(qs); if(isFinite(q) && q>1 && q<8 && T0>0.6) eDTL=arm*T0*q/(down/1000)*DTL_K*(impSrc==="sonido"?(opts.tImpactSrc==="behind"?DTL_SND_B:DTL_SND):1); }
     cands=[]; if(eDTL) cands.push([eDTL,1]); if(e3d && (!eDTL || Math.abs(e3d/eDTL-1)<0.35)) cands.push([e3d,0.6]); if(!cands.length && eModel) cands.push([eModel*1.04,0.8]); if(!cands.length) cands.push([e2dMax*1.6,1]); }
   handMax=cands.reduce((s,c)=>s+c[0]*c[1],0)/cands.reduce((s,c)=>s+c[1],0);
   if(!(handMax>0.8)) return {error:"No pude medir la velocidad de las manos. Revisa que se vean bien en toda la bajada.", code:"nospeed", obs:0};
@@ -193,26 +205,34 @@ SL.analyzePose=function(F, clubKey, opts={}){
   const vis=median(F.slice(top,imp+1).map(f=>Math.min(f.v.lw??1,f.v.rw??1)));
   pen(vis>=0.8?1:vis>=0.6?0.85:0.65, "las manos se ven poco en la bajada (luz o ropa del mismo color del fondo)");
   if(eModel && e2dImp){ const dis=Math.abs(eModel/e2dImp-1); pen(dis<0.15?1:dis<0.3?0.85:0.7, "el movimiento fue irregular para la cámara"); }
-  if(view!=="front") pen(0.88, "desde atrás la velocidad es un poco menos precisa que de frente");
+  if(view!=="front") pen(impSrc==="sonido"?0.93:0.88, "desde atrás la velocidad es un poco menos precisa que de frente");
+  if(view==="front" && handPeakMs!=null && (handPeakMs<-35 || handPeakMs>230)) pen(0.85, "la velocidad de tus manos no tuvo su pico justo antes del impacto, como es normal: pudo fallar la lectura");
+  if(opts.shutter===false && fps<27) pen(0.95, "con poca luz el teléfono alarga la exposición y baja los cuadros por segundo: busca más luz");
   reasons.sort((x,y)=>x[0]-y[0]);
   const camQ={score:Math.round(q*100)/100, level:q>=0.75?"alta":q>=0.5?"media":"baja", why:reasons.map(r=>r[1])};
 
   // postura (vista de frente)
   let posture=null;
+  // la postura se lee promediando cuadros vecinos (address: los cuadros quietos; impacto y cima: ±1 cuadro), no de un solo cuadro ruidoso
+  const avgOf=(get,i0,i1)=>{ let x=0,y=0,c=0; for(let j=Math.max(0,i0);j<=Math.min(n-1,i1);j++){ const v=get(j); if(!v) continue; x+=v[0]; y+=v[1]; c++; } return c?[x/c,y/c]:get(clamp(i0,0,n-1)); };
+  const atA=g=>avgOf(g,a-4,a), atI=g=>avgOf(g,imp-1,imp+1), atT=g=>avgOf(g,top-1,top+1);
+  const nose=j=>F[j].p.nose, hipC=j=>Hp[j], shC=j=>Sh[j], wid=(k1,k2)=>j=>[dist(F[j].p[k1],F[j].p[k2]),0];
   if(view==="front"){
     const tgt=-Math.sign(Hs[top][0]-Hs[a][0]) || 1;
-    const head=(F[imp].p.nose[0]-F[a].p.nose[0])*tgt*mPerPx*100, sway=(Hp[top][0]-Hp[a][0])*tgt*mPerPx*100, slide=(Hp[imp][0]-Hp[a][0])*tgt*mPerPx*100;
-    const sw0=dist(F[a].p.ls,F[a].p.rs), swT=dist(F[top].p.ls,F[top].p.rs), hw0=dist(F[a].p.lh,F[a].p.rh), hwT=dist(F[top].p.lh,F[top].p.rh);
+    const nA=atA(nose), nI=atI(nose), hA=atA(hipC);
+    const head=(nI[0]-nA[0])*tgt*mPerPx*100, sway=(atT(hipC)[0]-hA[0])*tgt*mPerPx*100, slide=(atI(hipC)[0]-hA[0])*tgt*mPerPx*100;
+    const sw0=atA(wid("ls","rs"))[0], swT=atT(wid("ls","rs"))[0], hw0=atA(wid("lh","rh"))[0], hwT=atT(wid("lh","rh"))[0];
     const shTurn=Math.acos(clamp(swT/(sw0||1),0,1))/DEG, hipTurn=Math.acos(clamp(hwT/(hw0||1),0,1))/DEG;
-    const headY=(F[imp].p.nose[1]-F[a].p.nose[1])*mPerPx*100;
+    const headY=(nI[1]-nA[1])*mPerPx*100;
     posture={head:Math.round(head), headY:Math.round(headY), sway:Math.round(sway), slide:Math.round(slide), shTurn:Math.round(shTurn), hipTurn:Math.round(hipTurn)};
   } else {
     // Desde atrás: ángulo de la columna, si te levantas o adelantas la cadera hacia la bola (extensión temprana),
     // la cabeza y dónde quedan las manos arriba respecto a la línea manos-hombros del address (el plano)
     const out=Math.sign(Hn[a][0]-Hp[a][0])||1;
-    const spineAt=i=>Math.atan2((Sh[i][0]-Hp[i][0])*out, Hp[i][1]-Sh[i][1])/DEG;   // >0: inclinado hacia la bola
-    const spineA=spineAt(a), spineI=spineAt(imp);
-    const hipThrust=(Hp[imp][0]-Hp[a][0])*out*mPerPx*100, headDrop=(F[imp].p.nose[1]-F[a].p.nose[1])*mPerPx*100, headIn=(F[imp].p.nose[0]-F[a].p.nose[0])*out*mPerPx*100;
+    const spineOf=(S,P)=>Math.atan2((S[0]-P[0])*out, P[1]-S[1])/DEG;   // >0: inclinado hacia la bola
+    const hA=atA(hipC), hI=atI(hipC), nA=atA(nose), nI=atI(nose);
+    const spineA=spineOf(atA(shC),hA), spineI=spineOf(atI(shC),hI);
+    const hipThrust=(hI[0]-hA[0])*out*mPerPx*100, headDrop=(nI[1]-nA[1])*mPerPx*100, headIn=(nI[0]-nA[0])*out*mPerPx*100;
     const L0=Hn[a], L1=Sh[a], dl=[L1[0]-L0[0],L1[1]-L0[1]], ln=Math.hypot(...dl)||1;
     const planeTop=((Hn[top][0]-L0[0])*dl[1]-(Hn[top][1]-L0[1])*dl[0])/ln*out*mPerPx*100;   // >0: manos del lado de la bola (subida vertical)
     posture={dtl:true, spine:Math.round(spineA), spineChg:Math.round(spineI-spineA), hipThrust:Math.round(hipThrust), headDrop:Math.round(headDrop), headIn:Math.round(headIn), planeTop:Math.round(planeTop),
@@ -227,7 +247,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
     omega:null, peak:null, obs:Math.round(handMax*100)/100, sat:false, method:"pose", seg:"pose",
     back:okT?back:null, down:okT?down:null, ratio: okT?back/down:null,
     face:0, faceOk:false, path, pathOk, pathRaw:pathRaw==null?null:+pathRaw.toFixed(1), faceAssumed:true, aoa, aoaOk, lowCm, arcTop, arcFin, len: arcTop<100?"medio":arcTop<150?"tres cuartos":"completo",
-    posture, camQ, hz:Math.round(fps),
+    posture, camQ, hz:Math.round(fps), impSrc, tImpAbs:tImp, tTopAbs:t[top], handPeakMs, handDrop:handDrop==null?null:+handDrop.toFixed(2),
     trace:{ t:t.slice(i0,i1+1).map(v=>v-t[i0]), d:ang.slice(i0,i1+1).map(v=>v/DEG), phi:ang.slice(i0,i1+1).map(v=>+(v/DEG).toFixed(1)),
             start:st-i0, top:top-i0, imp:imp-i0, fin:fin-i0, signed:true },
     poseFrames: F.slice(Math.max(0,a-8), Math.min(n,fin+10)).map(f=>({t:f.t, w:f.w, h:f.h, p:f.p})),
@@ -293,18 +313,57 @@ Cam.start=async function(o){
   try{
     if(!mock){
       // se pide la mayor cantidad de cuadros por segundo: es lo que más mejora la medición de la velocidad
-      const s=await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:opts.facing||"user", width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:60, max:60}}});
-      stream=s; video.srcObject=s; video.muted=true; video.playsInline=true; await video.play();
+      const vc={facingMode:opts.facing||"user", width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:60, max:60}};
+      // con el micrófono (sin filtros de voz, que borran los golpes secos) se oye el impacto
+      let s=null; Cam.mic=false;
+      if(opts.sound && SL.Sound){ try{ s=await navigator.mediaDevices.getUserMedia({video:vc, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}}); }catch(e){ s=null; } }
+      if(!s) s=await navigator.mediaDevices.getUserMedia({audio:false, video:vc});
+      stream=s; video.srcObject=new MediaStream(s.getVideoTracks()); video.muted=true; video.playsInline=true; await video.play();
+      const at=s.getAudioTracks()[0]; if(at && opts.audioCtx) Cam.mic=await SL.Sound.start(new MediaStream([at]), opts.audioCtx);
       const tr=s.getVideoTracks()[0], set=tr && tr.getSettings ? tr.getSettings() : {};
       Cam.camFps=Math.round(set.frameRate||0);
       await loadModel(opts.model==="lite"?"lite":"full");
+      if(opts.shutter!=="off") tuneShutter(tr).then(()=>{ try{ const s2=tr.getSettings(); Cam.camFps=Math.round(s2.frameRate||Cam.camFps); }catch(e){} }).catch(()=>{});
+      else { Cam.shutter=null; Cam.shutterTxt="automático"; }
     }
   }catch(e){ Cam.loading=false; stopStream(); status(e && e.name==="NotAllowedError" ? "Sin permiso para usar la cámara. Actívalo en los ajustes del navegador." : "No pude iniciar la cámara o el detector ("+(e&&e.message||e)+"). Revisa la conexión la primera vez.","bad"); cb.onError&&cb.onError(e); return false; }
   Cam.loading=false; Cam.on=true; st="seek"; buf=[]; trail=[]; coolUntil=0; stillSince=null; lastT=0; lastPF=null; Cam.drops=0;
   video.classList.toggle("mirror", (opts.facing||"user")==="user"); canvas.classList.toggle("mirror", (opts.facing||"user")==="user");
   schedule(); return true;
 };
-function stopStream(){ if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
+// Obturador rápido: con la exposición automática, en interiores el teléfono expone 1/30 s o más (las manos, a 9 m/s,
+// se corren 30 cm en una sola foto y el detector las pierde) y además baja a 15-20 cuadros por segundo.
+// Donde el navegador lo permite (Chrome en Android) se fija una exposición corta y se sube la sensibilidad;
+// si la imagen queda oscura se alarga un paso, y si ni así alcanza se vuelve a la automática.
+const EXPS=[1/1000, 1/500, 1/250, 1/125];
+function luma(){ try{ const c=luma.c||(luma.c=document.createElement("canvas")); c.width=48; c.height=36; const x=c.getContext("2d",{willReadFrequently:true});
+  x.drawImage(video,0,0,48,36); const d=x.getImageData(0,0,48,36).data; let s=0; for(let i=0;i<d.length;i+=4) s+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; return s/(d.length/4); }catch(e){ return NaN; } }
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+async function tuneShutter(tr){
+  Cam.shutter=null; Cam.shutterTxt="automático";
+  if(!tr || !tr.getCapabilities || !tr.applyConstraints) return;
+  let cap={}; try{ cap=tr.getCapabilities()||{}; }catch(e){ return; }
+  const adv={}; if(cap.focusMode && cap.focusMode.includes && cap.focusMode.includes("continuous")) adv.focusMode="continuous";
+  const okExp=cap.exposureMode && cap.exposureMode.includes && cap.exposureMode.includes("manual") && cap.exposureTime && cap.exposureTime.max>0;
+  if(!okExp){ if(adv.focusMode) try{ await tr.applyConstraints({advanced:[adv]}); }catch(e){} return; }
+  const toU=sec=>clamp(Math.round(sec/100e-6), cap.exposureTime.min||1, cap.exposureTime.max);   // exposureTime va en unidades de 100 µs
+  const isoMax=cap.iso&&cap.iso.max ? Math.min(cap.iso.max, 1600) : null;
+  let k=1, iso=isoMax;
+  for(let step=0; step<6 && stream && tr.readyState!=="ended"; step++){
+    const c=Object.assign({}, adv, {exposureMode:"manual", exposureTime:toU(EXPS[k])}); if(iso) c.iso=iso;
+    try{ await tr.applyConstraints({advanced:[c]}); }catch(e){ break; }
+    await wait(450); const L=luma();
+    if(!isFinite(L)) break;
+    if(L>=70 && L<=215){ Cam.shutter=EXPS[k]; Cam.shutterTxt="1/"+Math.round(1/EXPS[k])+" s"; return; }
+    if(L>215){ if(iso && cap.iso.min && iso>cap.iso.min*1.5){ iso=Math.max(cap.iso.min, Math.round(iso/2)); continue; } if(k>0){ k--; continue; } Cam.shutter=EXPS[k]; Cam.shutterTxt="1/"+Math.round(1/EXPS[k])+" s"; return; }
+    if(k<EXPS.length-1){ k++; continue; }
+    break;
+  }
+  // poca luz: vuelve a la exposición automática
+  try{ await tr.applyConstraints({advanced:[Object.assign({}, adv, {exposureMode:"continuous"})]}); }catch(e){}
+  Cam.shutter=false; Cam.shutterTxt="automático (poca luz)";
+}
+function stopStream(){ if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
 Cam.stop=function(){ Cam.on=false; cancelAnimationFrame(raf); raf=0; if(vfc && video && video.cancelVideoFrameCallback) try{ video.cancelVideoFrameCallback(vfc); }catch(_){} vfc=0; stopStream(); st="idle"; lockUntil=0; status(null); if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height); };
 // pausa la lectura (para apuntar o mientras vuela la bola); al seguir, da unos segundos para ponerse en posición
 Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ st="seek"; stillSince=null; readyHip=null; return; }

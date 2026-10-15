@@ -2,11 +2,11 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.12";
+const VERSION="0.13";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
@@ -93,12 +93,12 @@ let ac=null;
 function audio(){ try{ if(!ac){ const C=window.AudioContext||window.webkitAudioContext; if(C) ac=new C(); } if(ac && ac.state==="suspended") ac.resume(); }catch(_){} return ac; }
 function beep(f,d,at){ const a=audio(); if(!a) return; const o=a.createOscillator(), g=a.createGain(), t0=at??a.currentTime;
   o.type="sine"; o.frequency.value=f; g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.4,t0+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t0+d);
-  o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0+d+0.03); }
+  o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0+d+0.03); if(SL.Sound) SL.Sound.mute(t0,d+0.03); }
 function noise(dur,freq,q,gain,type){ const a=audio(); if(!a) return; try{
   const n=Math.floor(a.sampleRate*dur), b=a.createBuffer(1,n,a.sampleRate), d=b.getChannelData(0);
   for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);
   const s=a.createBufferSource(), f=a.createBiquadFilter(), g=a.createGain(); f.type=type||"bandpass"; f.frequency.value=freq; f.Q.value=q; g.gain.value=gain;
-  s.buffer=b; s.connect(f); f.connect(g); g.connect(a.destination); s.start(); }catch(_){} }
+  s.buffer=b; s.connect(f); f.connect(g); g.connect(a.destination); s.start(); if(SL.Sound) SL.Sound.mute(a.currentTime,dur); }catch(_){} }
 const sfx={ hit:()=>noise(0.07,2600,1.2,1), land:()=>noise(0.12,320,0.8,0.7,"lowpass"), putt:()=>noise(0.05,1800,2,0.5), cup:()=>{ noise(0.08,900,3,0.6); setTimeout(()=>noise(0.06,1200,3,0.4),90); }, splash:()=>noise(0.45,700,0.5,0.6,"lowpass") };
 function playRhythm(){ const a=audio(); if(!a) return; const [B,D]=S.guideRatio.split("/").map(Number), t0=a.currentTime+0.5;
   beep(660,0.09,t0); beep(660,0.09,t0+B/30); beep(990,0.15,t0+(B+D)/30); }
@@ -558,8 +558,16 @@ function verdictFor(h){
   const sh=shapeName(h); if(sh) p.push(h.faceOk?`<em>${sh}.</em> Cara ${fmtFace(h).toLowerCase()}`+(h.pathOk?`, ruta ${fmtPath(h).toLowerCase()}.`:"."):`<em>${sh}.</em>`);
   if(h.sat) p.push(h.method==="fit"?"El sensor topó y reconstruí el pico.":"El sensor topó: tu velocidad real es mayor que esta.");
   if(h.source==="camera"){ const at=aoaTip(h); if(at) p.push(at);
-    if(h.hand){ const hs=fmtSpeed(h.hand); p.push(`Tus manos llegaron a ${hs.v} ${hs.u} en la bajada (un golfista promedio anda por ${fmtSpeed(8.9).v} y los más rápidos del tour pasan de ${fmtSpeed(12.8).v}).`); }
+    if(h.hand){ const hs=fmtSpeed(h.hand); p.push(`Tus manos llegaron a ${hs.v} ${hs.u} en la bajada (un golfista promedio anda por ${fmtSpeed(8.9).v} y los más rápidos del tour pasan de ${fmtSpeed(12.8).v}).`);
+      if(h.view==="front" && h.handDrop!=null && h.handPeakMs!=null && h.handPeakMs>-35 && h.handPeakMs<230){
+        if(h.handDrop<0.06) p.push("Tus manos casi no frenaron antes del impacto: en un swing eficiente las manos frenan justo antes de la bola para que la cabeza del palo las adelante.");
+        else p.push(`Tus manos llegaron a su máximo ${Math.max(0,h.handPeakMs)} ms antes del impacto y frenaron un ${Math.round(h.handDrop*100)}% al llegar a la bola: ese freno es el que suelta el palo (en los jugadores hábiles el máximo llega unos 50 ms antes).`); } }
+    if(h.impSrc==="sonido") p.push("El impacto lo marcó el sonido del golpe (más exacto que la imagen).");
+    else if(h.heard){ const c=SL.Sound.calib(); if(!c.ok) p.push(`Oí el golpe: con ${Math.max(1,3-c.n)} golpe${3-c.n>1?"s":""} más la app aprende a sincronizar el sonido con la imagen.`); }
     if(h.posture) p.push(...postureTips(h.posture));
+    if(h.posture && h.posture.dtl){ const sp=[h,...history.filter(x=>x.id!==h.id && x.source==="camera" && x.posture && x.posture.dtl).slice(0,5)].map(x=>x.posture.spine);
+      if(sp.length>=4){ const m=sp.reduce((a,b)=>a+b,0)/sp.length, sd=Math.sqrt(sp.reduce((a,b)=>a+(b-m)**2,0)/sp.length);
+        p.push(sd<=3?`Tu inclinación en el address se repite muy bien entre swings (±${sd.toFixed(0)}°): repetirla es de lo que más se relaciona con el puntaje.`:`Tu inclinación en el address cambia ±${sd.toFixed(0)}° entre swings: repetirla es de lo que más se relaciona con el puntaje; usa siempre la misma rutina de preparación.`); } }
     if(h.camQ && h.camQ.level!=="alta") p.push(`Lectura de la cámara ${h.camQ.level}: ${h.camQ.why[0]||"revisa la luz y el encuadre"}.`);
     p.push(h.pathOk?`Con la cámara se estima la ruta (${fmtPath(h).toLowerCase()}) y la cara se asume cuadrada al objetivo: la curva del tiro sale de tu ruta${h.view==="front"?"; desde atrás la ruta se ve mejor":""}.`:"Con la cámara la dirección sale recta: no pude estimar la ruta en este swing."); }
   if(h.shot && h.shot!=="normal"){ const want=SL.SHOTS[h.shot].name, got=shapeName(h);
@@ -581,7 +589,7 @@ function renderBoard(h,flash){
   $("carry").textContent=fmtDist(dv.carry);
   $("clubLab").textContent=CLUBS[h.club].name; const ck=calibKind(h.club,srcOf(h)); $("calibTag").textContent=ck?"· calibrado con "+ck:"";
   if(h.source==="camera"){ const hs=fmtSpeed(h.hand||0);
-    $("quality").textContent=(h.camQ?`Lectura de cámara ${h.camQ.level} · `:"")+`${h.hz} cuadros por segundo · manos ${hs.v} ${hs.u} (máx.)`+(h.arm?` · brazo ${Math.round(h.arm*100)} cm`:"")+(h.aoaOk?` · ataque ${sgn(h.aoa)}`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<45?" Con 60 cuadros por segundo la medición es más precisa.":""); }
+    $("quality").textContent=(h.camQ?`Lectura de cámara ${h.camQ.level} · `:"")+`${h.hz} cuadros por segundo`+(h.shutter?` · obturador ${h.shutter}`:"")+(h.impSrc==="sonido"?" · impacto por sonido":h.heard?" · oí el golpe":"")+` · manos ${hs.v} ${hs.u} (máx.)`+(h.arm?` · brazo ${Math.round(h.arm*100)} cm`:"")+(h.aoaOk?` · ataque ${sgn(h.aoa)}`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<45?" Con 60 cuadros por segundo la medición es más precisa.":""); }
   else $("quality").textContent=`Sensor a ${h.hz} lecturas por segundo · giro en el impacto ${h.omega??h.peak}°/s${h.sat?" (sensor saturado)":""}`+(h.aoa&&h.pathOk?` · ataque ${h.aoa>0?"+":""}${h.aoa}°`:"")+` · lanzamiento ${dv.launch.toFixed(0)}° · spin ${Math.round(dv.spin/100)*100} rpm.`+(h.hz<90?" A menos de 90 lecturas por segundo el pico puede quedar un poco bajo.":"");
 }
 const setVerdict=html=>{ $("verdict").innerHTML=html; };
@@ -804,11 +812,16 @@ async function camStart(){
   $("go").textContent="Iniciando cámara…"; $("go").className="go live"; camHold=false; camBig=false;
   $("camBox").hidden=false; $("camBox").classList.add("pip"); $("camVideo").hidden=!!window.__camMock;
   if(!store.get("sl11_guide",false)) showGuide();
-  const ok=await SL.Cam.start({facing:S.camFacing, model:S.camModel, view:S.camView, onStatus:camStatus, onReady:()=>{ if(S.guide) playRhythm(); else beep(880,0.08); },
+  const ok=await SL.Cam.start({facing:S.camFacing, model:S.camModel, view:S.camView, sound:S.camSound==="on", audioCtx:audio(), shutter:S.camShutter, onStatus:camStatus, onReady:()=>{ if(S.guide) playRhythm(); else beep(880,0.08); },
     onView:v=>{ if(S.camView===v) return; S.camView=v; saveSettings(); $("camView").value=v; SL.Cam.setView(v); camLayer(true,true);
       SL.Cam.flash(v==="behind"?"Te veo de perfil: uso la vista desde atrás":"Te veo de frente: uso la vista de frente","wait",2600); say(v==="behind"?"Te veo de perfil. Uso la vista desde atrás.":"Te veo de frente."); },
-    onSwing:frames=>{ if(World.busy() || aimMode) return; const res=SL.analyzePose(frames, club, {grip:S.camGrip, view:S.camView});
-      if(res.error){ camError(res); return; } res.model=SL.Cam.model; res.camFps=SL.Cam.camFps;
+    onSwing:frames=>{ if(World.busy() || aimMode) return; const po={grip:S.camGrip, view:S.camView, shutter:SL.Cam.shutter};
+      let res=SL.analyzePose(frames, club, po);
+      if(res.error){ camError(res); return; }
+      // segunda pasada con el impacto que oyó el micrófono (más exacto que el cuadro de video)
+      if(SL.Sound && SL.Sound.on){ const hit=SL.Sound.impactFor(res);
+        if(hit){ if(hit.t!=null){ const r2=SL.analyzePose(frames, club, Object.assign({tImpact:hit.t, tImpactSrc:hit.src},po)); if(!r2.error) res=r2; } res.heard=true; } }
+      res.model=SL.Cam.model; res.camFps=SL.Cam.camFps; res.shutter=SL.Cam.shutterTxt||null; res.mic=!!SL.Cam.mic;
       if(mode==="data"||mode==="rank"||!has3D){ SL.Cam.pause(true); setTimeout(()=>{ if(camState==="on" && !camHold) SL.Cam.pause(false,600); camLayer(true); },1800); }
       handleResult(res); }});
   if(!ok){ camState="off"; setCamButton(); camLayer(false); return; }
@@ -902,6 +915,7 @@ function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear()
 bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
 bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("camModel","camModel",()=>{ if(camState==="on"){ camStop(); camStart(); } });
+bindSel("camSound","camSound",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camShutter","camShutter",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("alt","alt",()=>{ S.alt=+S.alt||0; saveSettings(); applyAlt(); fcache.clear(); dcache.clear(); renderAll(); });
 bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
 document.querySelectorAll("#distSeg button").forEach(b=>b.addEventListener("click",()=>setDist(b.dataset.d)));
