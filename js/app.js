@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.13";
+const VERSION="0.14";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -529,6 +529,10 @@ function postureTips(po){ const t=[];
     if(po.hipThrust>=6 || po.spineChg<=-8) t.push(`<em>Te levantas en la bajada</em> (extensión temprana): tu cadera se acerca ${Math.max(0,po.hipThrust)} cm a la bola y la columna se endereza ${Math.max(0,-po.spineChg)}°. Mantén la inclinación hasta el impacto.`);
     else t.push(`Mantuviste la inclinación de la columna hasta el impacto (${po.spineChg>0?"+":""}${po.spineChg}°): muy bien.`);
     if(Math.abs(po.headDrop)>=7) t.push(`Tu cabeza ${po.headDrop>0?"bajó":"subió"} ${Math.abs(po.headDrop)} cm en el impacto.`);
+    if(po.loop!=null){ const L=Math.abs(po.loop);
+      if(po.loop>=5) t.push(`<em>Bajada por encima:</em> tus manos bajaron ${L} cm por fuera del camino de la subida. Es lo que suele dar ruta de afuera hacia adentro (slice o pull): empieza la bajada con la cadera y deja caer los brazos antes de girar.`);
+      else if(po.loop<=-7) t.push(`<em>Bajada muy por dentro:</em> tus manos bajaron ${L} cm por dentro de la subida. Ayuda al draw, pero si se pasa da push o hook.`);
+      else t.push(`Tu bajada siguió ${po.loop<0?"por dentro de":"casi el mismo camino que"} la subida (${po.loop>0?"+":""}${po.loop} cm): buen plano.`); }
     if(po.planeTop>15) t.push("Arriba las manos quedan por fuera de la línea del plano (azul): la subida es muy vertical.");
     else if(po.planeTop<-15) t.push("Arriba las manos quedan muy por detrás de la línea del plano (azul): la subida es muy plana.");
     return t; }
@@ -611,36 +615,141 @@ function renderHist(){
 function drawTrace(){
   const cv=$("plot"); if(cv.closest("[hidden]")) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
   cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,W,H);
-  const tr=shown && shown.trace; if(!tr) return; drawSwingViz();
+  drawKeys(); const tr=shown && shown.trace; if(!tr) return; drawSwingViz();
+  const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line");
   const usePhi=!!tr.phi; const D=usePhi?tr.phi.map(v=>v??0):tr.d;
   let lo=0, hi=0; D.forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
-  const T=tr.t[tr.t.length-1]||1, pad=16, x=t=>pad+t/T*(W-2*pad), y=v=>pad+(hi-v)/(hi-lo||1)*(H-2*pad-14);
-  c.strokeStyle=css("--line"); c.lineWidth=1; c.beginPath(); c.moveTo(pad,y(0)); c.lineTo(W-pad,y(0)); c.stroke();
-  const seg=(a,b,col)=>{ c.strokeStyle=col; c.lineWidth=2.5; c.beginPath(); for(let i=a;i<=b;i++){ const X=x(tr.t[i]),Y=y(D[i]); i===a?c.moveTo(X,Y):c.lineTo(X,Y);} c.stroke(); };
-  const top=tr.top ?? 0; seg(0,top,css("--muted")); seg(top,tr.d.length-1,css("--accent"));
-  c.fillStyle=css("--ink"); c.font="13px "+css("--body"); c.textAlign="center";
+  const T=tr.t[tr.t.length-1]||1, pad=16, top0=34, x=t=>pad+t/T*(W-2*pad), y=v=>top0+(hi-v)/(hi-lo||1)*(H-top0-30);
+  // franjas de fase: subida y bajada, con su duración
+  let lastEnd=-1e9; const band=(i0,i1,col,alpha,label)=>{ if(i0==null||i1==null||i1<=i0) return; const x0=x(tr.t[i0]), x1=x(tr.t[i1]); c.globalAlpha=alpha; c.fillStyle=col; c.fillRect(x0,top0-14,x1-x0,H-top0-12); c.globalAlpha=1;
+    c.fillStyle=ink; c.font="600 11px "+css("--body"); const tw=c.measureText(label).width; let lx=(x0+x1)/2-tw/2; if(tw>x1-x0) lx=x1+4; lx=Math.max(lx,lastEnd+8); lx=Math.min(lx,W-pad-tw); c.textAlign="left"; c.fillText(label,lx,13); lastEnd=lx+tw; };
+  const dur=(a,b)=>((tr.t[b]-tr.t[a])/1000).toFixed(2)+" s";
+  band(tr.start,tr.top,mut,0.12,"subida "+(tr.start!=null&&tr.top!=null?dur(tr.start,tr.top):""));
+  band(tr.top,tr.imp,acc,0.2,"bajada "+(tr.top!=null&&tr.imp!=null?dur(tr.top,tr.imp):""));
+  c.strokeStyle=line; c.lineWidth=1; c.beginPath(); c.moveTo(pad,y(0)); c.lineTo(W-pad,y(0)); c.stroke();
+  const seg=(a,b,col)=>{ c.strokeStyle=col; c.lineWidth=2.5; c.lineJoin="round"; c.beginPath(); for(let i=a;i<=b;i++){ const X=x(tr.t[i]),Y=y(D[i]); i===a?c.moveTo(X,Y):c.lineTo(X,Y);} c.stroke(); };
+  const top=tr.top ?? 0; seg(0,top,mut); seg(top,tr.d.length-1,acc);
+  c.fillStyle=ink; c.font="13px "+css("--body"); c.textAlign="center";
   const mark=(i,ch,dy)=>{ if(i!=null) c.fillText(ch,x(tr.t[i]),y(D[i])+dy); }; mark(tr.start,"▲",16); mark(tr.top,"●",usePhi?-8:16); mark(tr.imp,"★",usePhi?16:-8); if(tr.fin!=null) mark(tr.fin,"■",16);
-  c.fillStyle=css("--muted"); c.font="11px "+css("--body"); c.textAlign="left"; c.fillText(usePhi?"ángulo del palo (°)":"giro °/s",pad,H-4); c.textAlign="right"; c.fillText((T/1000).toFixed(1)+" s",W-pad,H-4);
+  if(shown.ratio){ const txt="tempo "+fmtRatio(shown.ratio); c.font="700 12px "+css("--body"); const tw=c.measureText(txt).width+12; c.fillStyle=css("--deep"); c.fillRect(W-pad-tw,H-20,tw,17); c.fillStyle=css("--deep-ink"); c.textAlign="right"; c.fillText(txt,W-pad-6,H-7); }
+  c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="left"; c.fillText(usePhi?"ángulo de las manos (°) en el tiempo":"giro °/s",pad,H-6);
 }
+// ---- gráficas ----
+const pcache=new Map();
+function derivePts(h){ const dv=derive(h), key=h.id+"|"+dv.ms.toFixed(3)+"|"+S.hand+"|"+SL.env.alt+"|"+(h.shot||""); if(pcache.has(key)) return pcache.get(key);
+  const sim=SL.simulateLocal(launch(h.club,dv.ms,h,"tee"),[0,0],null), out={fl:sim.pts.filter(q=>q.t<=sim.landT+1e-6), roll:sim.pts.filter(q=>q.t>=sim.landT-1e-6)};
+  pcache.set(key,out); if(pcache.size>150) pcache.clear(); return out; }
+function canvasFor(id){ const cv=$(id); if(!cv || cv.closest("[hidden]")) return null; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight; if(!W||!H) return null;
+  cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,W,H); return {cv,c,W,H}; }
+const fieldShots=()=>{ const cur=shown && shown.club===club?shown:null; const prev=history.filter(h=>h.club===club && (!cur || h.id!==cur.id)).slice(0,20); return {cur, prev, all:cur?[cur,...prev]:prev}; };
+let rangeHits=[], rangePick=null;
 function drawField(){
-  const cv=$("range"); if(cv.closest("[hidden]")) return; const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
-  cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0);
+  const g=canvasFor("range"); if(!g) return; const {c,W,H}=g;
+  const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line"), surf=css("--surface");
   c.fillStyle=css("--rough"); c.fillRect(0,0,W,H);
-  const shots=history.filter(h=>h.club===club).slice(0,20), cur=shown && shown.club===club?shown:null;
-  const tots=shots.map(h=>derive(h).total); if(cur) tots.push(derive(cur).total);
-  const maxD=Math.max(120,...tots)*1.15, tee={x:W/2,y:H-18}, sc=(H-36)/maxD;
-  c.fillStyle=css("--fairway"); c.beginPath(); c.moveTo(tee.x-14,tee.y+10); c.lineTo(tee.x+14,tee.y+10); c.lineTo(tee.x+22*sc+12,0); c.lineTo(tee.x-22*sc-12,0); c.fill();
+  const {cur,prev,all}=fieldShots(); const dvs=all.map(derive);
+  const maxD=Math.max(120,...dvs.map(d=>d.total))*1.12, tee={x:W/2,y:H-20}, sc=(H-40)/maxD;
+  // si los tiros quedan muy juntos de lado, el ancho se amplía (hasta ×3) y se avisa en la esquina
+  const maxLat=Math.max(12,...dvs.map(d=>Math.abs(d.lat)))*1.25, ex=Math.max(1,Math.min(3,(W/2-24)/maxLat/sc)), sx=sc*ex;
+  const X=lat=>Math.max(6,Math.min(W-6,tee.x+lat*sx)), Y=d=>tee.y-d*sc;
+  // calle con franjas de corte
+  const fw=18; c.save(); c.beginPath(); c.moveTo(X(-5),tee.y+12); c.lineTo(X(5),tee.y+12); c.lineTo(X(fw),Y(maxD*0.6)); c.lineTo(X(fw+4),0); c.lineTo(X(-fw-4),0); c.lineTo(X(-fw),Y(maxD*0.6)); c.closePath(); c.fillStyle=css("--fairway"); c.fill(); c.clip();
+  c.fillStyle="rgba(255,255,255,0.10)"; for(let d=0; d<maxD; d+=20){ c.fillRect(0,Y(d+10),W,10*sc); } c.restore();
+  // tee
+  c.fillStyle=css("--green"); c.fillRect(tee.x-12,tee.y-4,24,10);
   const um=S.dist==="yd"?0.9144:1, ul=S.dist==="yd"?" yd":" m", step=maxD/um>180?50:25;
-  c.strokeStyle=css("--line"); c.lineWidth=1; c.fillStyle=css("--muted"); c.font="11px "+css("--body"); c.textAlign="left";
-  for(let dd=step; dd*um<maxD; dd+=step){ const R=dd*um*sc; c.beginPath(); c.arc(tee.x,tee.y,R,-Math.PI*0.75,-Math.PI*0.25); c.stroke();
-    const lx=tee.x+R*Math.cos(-Math.PI*0.75), ly=tee.y+R*Math.sin(-Math.PI*0.75); if(ly>10) c.fillText(dd+ul,Math.max(4,lx-4),ly-3); }
-  const pos=h=>{ const dv=derive(h); return {x:Math.max(6,Math.min(W-6,tee.x+dv.lat*sc)), y:tee.y-dv.total*sc, dv}; };
-  c.fillStyle=css("--muted"); shots.forEach(h=>{ if(cur && h.id===cur.id) return; const p=pos(h); c.beginPath(); c.arc(p.x,p.y,3.5,0,Math.PI*2); c.fill(); });
-  c.fillStyle=css("--ink"); c.beginPath(); c.arc(tee.x,tee.y,3,0,Math.PI*2); c.fill();
-  if(cur){ const p=pos(cur); c.fillStyle=css("--accent"); c.strokeStyle=css("--surface"); c.lineWidth=2; c.beginPath(); c.arc(p.x,p.y,6.5,0,Math.PI*2); c.fill(); c.stroke();
-    c.fillStyle=css("--ink"); c.font="600 12px "+css("--body"); c.textAlign=p.x>W*0.6?"right":"left";
+  c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="left";
+  for(let dd=step; dd*um<maxD; dd+=step){ const R=dd*um*sc; c.beginPath(); c.ellipse(tee.x,tee.y,R*ex,R,0,-Math.PI*0.78,-Math.PI*0.22); c.stroke();
+    const lx=tee.x+R*ex*Math.cos(-Math.PI*0.78), ly=tee.y+R*Math.sin(-Math.PI*0.78); if(ly>10) c.fillText(dd+ul,Math.max(4,lx-2),ly-3); }
+  if(ex>1.15){ c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="right"; c.fillText(`ancho ×${ex.toFixed(1)}`,W-8,14); }
+  // dispersión: promedio y elipse de una desviación
+  if(all.length>=3){ const n=dvs.length, mT=dvs.reduce((a,d)=>a+d.total,0)/n, mL=dvs.reduce((a,d)=>a+d.lat,0)/n;
+    const sT=Math.sqrt(dvs.reduce((a,d)=>a+(d.total-mT)**2,0)/n), sL=Math.sqrt(dvs.reduce((a,d)=>a+(d.lat-mL)**2,0)/n);
+    c.save(); c.setLineDash([5,4]); c.strokeStyle=ink; c.globalAlpha=0.55; c.lineWidth=1.5; c.beginPath(); c.ellipse(X(mL),Y(mT),Math.max(4,sL*sx),Math.max(4,sT*sc),0,0,Math.PI*2); c.stroke();
+    c.globalAlpha=0.06; c.fillStyle=ink; c.fill(); c.restore();
+    c.strokeStyle=ink; c.lineWidth=1.5; c.beginPath(); c.moveTo(X(mL)-5,Y(mT)); c.lineTo(X(mL)+5,Y(mT)); c.moveTo(X(mL),Y(mT)-5); c.lineTo(X(mL),Y(mT)+5); c.stroke();
+    const right=X(mL)<W*0.5, lx=right?X(mL)+Math.max(4,sL*sx)+8:X(mL)-Math.max(4,sL*sx)-8;
+    c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign=right?"left":"right"; c.fillText(`prom. ${fmtDist(mT)}`, lx, Y(mT)+4);
+    c.fillStyle=mut; c.font="11px "+css("--body"); c.fillText(`±${fmtDist(sT)} largo · ±${fmtDist(sL)} lado`, lx, Y(mT)+18); }
+  // vuelos vistos desde arriba
+  rangeHits=[];
+  const trace=(h,col,w,alpha)=>{ const P=derivePts(h); c.save(); c.globalAlpha=alpha; c.strokeStyle=col; c.lineWidth=w; c.lineCap="round";
+    c.beginPath(); P.fl.forEach((q,k)=>{ const x=X(q.x), y=Y(Math.hypot(q.x,q.z)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
+    if(P.roll.length>1){ c.setLineDash([2,4]); c.beginPath(); P.roll.forEach((q,k)=>{ const x=X(q.x), y=Y(Math.hypot(q.x,q.z)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke(); }
+    c.restore(); const dv=derive(h); return {x:X(dv.lat), y:Y(dv.total), dv}; };
+  prev.slice().reverse().forEach(h=>{ const p=trace(h,mut,1.2,0.45); c.fillStyle=mut; c.beginPath(); c.arc(p.x,p.y,3.5,0,Math.PI*2); c.fill(); rangeHits.push({h,...p}); });
+  c.fillStyle=ink; c.beginPath(); c.arc(tee.x,tee.y,3,0,Math.PI*2); c.fill();
+  if(cur){ const p=trace(cur,acc,2.75,1); c.fillStyle=acc; c.strokeStyle=surf; c.lineWidth=2; c.beginPath(); c.arc(p.x,p.y,6.5,0,Math.PI*2); c.fill(); c.stroke(); rangeHits.push({h:cur,...p});
+    c.fillStyle=ink; c.font="600 12px "+css("--body"); c.textAlign=p.x>W*0.6?"right":"left";
     c.fillText(fmtDist(p.dv.total)+" · "+fmtLat(p.dv.lat)+(cur.example?" · ejemplo":""), p.x+(p.x>W*0.6?-10:10), Math.max(14,p.y-8)); }
+  const pk=rangePick && rangeHits.find(r=>r.h.id===rangePick); if(pk){ c.strokeStyle=ink; c.lineWidth=2; c.beginPath(); c.arc(pk.x,pk.y,9,0,Math.PI*2); c.stroke(); }
 }
+$("range").addEventListener("click",e=>{ const r=$("range").getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+  let best=null, bd=26; for(const q of rangeHits){ const d=Math.hypot(q.x-x,q.y-y); if(d<bd){ bd=d; best=q; } }
+  rangePick=best?best.h.id:null; const h=best&&best.h, dv=best&&best.dv, sp=h&&fmtSpeed(dv.ms);
+  $("rangeTip").textContent = h ? `${CLUBS[h.club].name} · ${sp.v} ${sp.u} · carry ${fmtDist(dv.carry)} · total ${fmtDist(dv.total)} · ${fmtLat(dv.lat)}`+(shapeName(h)?` · ${shapeName(h)}`:"")+` · altura ${Math.round(dv.apex)} m` : "Toca un tiro para ver sus datos.";
+  drawField(); drawSide(); });
+// vuelo visto de lado
+function drawSide(){
+  const g=canvasFor("side"); if(!g) return; const {c,W,H}=g; const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line");
+  const {cur,prev,all}=fieldShots(); if(!all.length){ c.fillStyle=mut; c.font="12px "+css("--body"); c.textAlign="center"; c.fillText("La vista de lado aparece con tu primer tiro",W/2,H/2); return; }
+  const dvs=all.map(derive), maxD=Math.max(120,...dvs.map(d=>d.total))*1.05, maxH=Math.max(12,...dvs.map(d=>d.apex))*1.3;
+  const L=34, B=20, X=d=>L+d/maxD*(W-L-10), Y=hh=>H-B-hh/maxH*(H-B-10);
+  c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="right";
+  const hs=maxH>45?20:10; for(let hh=hs; hh<maxH; hh+=hs){ c.beginPath(); c.moveTo(L,Y(hh)); c.lineTo(W-10,Y(hh)); c.stroke(); c.fillText(hh+" m",L-4,Y(hh)+4); }
+  c.strokeStyle=mut; c.beginPath(); c.moveTo(L,Y(0)); c.lineTo(W-10,Y(0)); c.stroke();
+  const um=S.dist==="yd"?0.9144:1, ul=S.dist==="yd"?" yd":" m", step=maxD/um>180?50:25; c.textAlign="center";
+  for(let dd=step; dd*um<maxD; dd+=step) c.fillText(dd+ul, X(dd*um), H-5);
+  const arc=(h,col,w,alpha)=>{ const P=derivePts(h); c.save(); c.globalAlpha=alpha; c.strokeStyle=col; c.lineWidth=w; c.beginPath();
+    P.fl.forEach((q,k)=>{ const x=X(Math.hypot(q.x,q.z)), y=Y(q.y); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
+    if(P.roll.length>1){ c.setLineDash([2,4]); c.beginPath(); P.roll.forEach((q,k)=>{ const x=X(Math.hypot(q.x,q.z)), y=Y(Math.max(0,q.y)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke(); } c.restore(); };
+  prev.slice().reverse().forEach(h=>arc(h,mut,1.2,0.4));
+  const sel=(rangePick && all.find(h=>h.id===rangePick)) || cur;
+  if(sel){ arc(sel,acc,2.5,1); const dv=derive(sel), P=derivePts(sel); let ap=P.fl[0]; P.fl.forEach(q=>{ if(q.y>ap.y) ap=q; });
+    const ax=X(Math.hypot(ap.x,ap.z)), ay=Y(ap.y); c.fillStyle=acc; c.beginPath(); c.arc(ax,ay,4,0,Math.PI*2); c.fill();
+    c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign="center"; c.fillText(`altura ${Math.round(dv.apex)} m`, ax, Math.max(12,ay-8));
+    const lx=X(dv.carry); c.fillStyle=acc; c.beginPath(); c.arc(lx,Y(0),3.5,0,Math.PI*2); c.fill(); c.fillStyle=ink; c.textAlign=lx>W*0.8?"right":"center";
+    c.fillText(`carry ${fmtDist(dv.carry)} · ${dv.launch.toFixed(0)}° de salida`, Math.min(lx,W-12), Y(0)-7); }
+}
+// velocidad de cada swing con este palo (del más viejo al más nuevo)
+function drawTrend(){
+  const g=canvasFor("trend"); if(!g) return; const {c,W,H}=g; const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line");
+  const mine=history.filter(h=>h.club===club).slice(0,30).reverse(); const u=fmtSpeed(1).u;
+  if(mine.length<2){ c.fillStyle=mut; c.font="12px "+css("--body"); c.textAlign="center"; c.fillText("Con 2 swings o más verás tu tendencia de velocidad",W/2,H/2); return; }
+  const v=mine.map(h=>toUnit(derive(h).ms)), n=v.length, m=v.reduce((a,b)=>a+b,0)/n, sd=Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/n);
+  let lo=Math.min(...v,m-sd), hi=Math.max(...v,m+sd); const pad=(hi-lo)*0.15+1; lo-=pad; hi+=pad;
+  const L=36, R=12, T=14, B=18, X=i=>L+(n===1?0.5:i/(n-1))*(W-L-R), Y=y=>T+(hi-y)/(hi-lo)*(H-T-B);
+  c.fillStyle=ink; c.globalAlpha=0.06; c.fillRect(L,Y(m+sd),W-L-R,Y(m-sd)-Y(m+sd)); c.globalAlpha=1;
+  c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="right";
+  [lo+pad, (lo+hi)/2, hi-pad].forEach(y=>{ c.fillText(y.toFixed(0),L-4,Y(y)+4); });
+  c.setLineDash([5,4]); c.strokeStyle=mut; c.beginPath(); c.moveTo(L,Y(m)); c.lineTo(W-R,Y(m)); c.stroke(); c.setLineDash([]);
+  c.strokeStyle=ink; c.globalAlpha=0.75; c.lineWidth=2; c.beginPath(); v.forEach((y,i)=>i?c.lineTo(X(i),Y(y)):c.moveTo(X(i),Y(y))); c.stroke(); c.globalAlpha=1;
+  const bi=v.indexOf(Math.max(...v)); v.forEach((y,i)=>{ c.fillStyle=i===bi?acc:ink; c.beginPath(); c.arc(X(i),Y(y),i===bi||i===n-1?4.5:2.5,0,Math.PI*2); c.fill(); });
+  c.strokeStyle=css("--surface"); c.lineWidth=2; c.beginPath(); c.arc(X(n-1),Y(v[n-1]),4.5,0,Math.PI*2); c.stroke();
+  c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign=X(bi)>W*0.7?"right":"left"; c.fillText(`mejor ${v[bi].toFixed(0)} ${u}`, X(bi)+(X(bi)>W*0.7?-8:8), Math.max(11,Y(v[bi])-6));
+  c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="left"; c.fillText(`prom. ${m.toFixed(0)} ±${sd.toFixed(0)} ${u}`, L+4, H-4); c.textAlign="right"; c.fillText(`${n} swings · último →`, W-R, H-4);
+}
+// distancias por palo: carry + rodado, con el rango de tus tiros
+function drawGaps(){
+  const cv=$("gaps"); if(!cv || cv.closest("[hidden]")) return; const keys=Object.keys(CLUBS).filter(k=>history.some(h=>h.club===k));
+  const rowH=30, top=8; cv.style.height=(keys.length?keys.length*rowH+top+16:60)+"px"; const g=canvasFor("gaps"); if(!g) return; const {c,W,H}=g;
+  const ink=css("--ink"), mut=css("--muted"), line=css("--line");
+  if(!keys.length){ c.fillStyle=mut; c.font="12px "+css("--body"); c.textAlign="center"; c.fillText("Aquí verás cuánto pega cada palo",W/2,H/2); return; }
+  const rows=keys.map(k=>{ const d=history.filter(h=>h.club===k).slice(0,30).map(derive); const n=d.length, mc=d.reduce((a,x)=>a+x.carry,0)/n, mt=d.reduce((a,x)=>a+x.total,0)/n;
+    return {k, n, mc, mt, lo:Math.min(...d.map(x=>x.total)), hi:Math.max(...d.map(x=>x.total))}; });
+  const maxD=Math.max(...rows.map(r=>r.hi))*1.08, L=74, R=10, X=d=>L+d/maxD*(W-L-R);
+  const um=S.dist==="yd"?0.9144:1, step=maxD/um>180?50:25; c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="10px "+css("--body"); c.textAlign="center";
+  for(let dd=step; dd*um<maxD; dd+=step){ c.beginPath(); c.moveTo(X(dd*um),top); c.lineTo(X(dd*um),H-14); c.stroke(); c.fillText(String(dd),X(dd*um),H-3); }
+  rows.forEach((r,i)=>{ const y=top+i*rowH, bh=14, by=y+(rowH-bh)/2-2;
+    c.fillStyle=ink; c.font=(r.k===club?"700 ":"500 ")+"12px "+css("--body"); c.textAlign="left"; c.fillText(CLUBS[r.k].name,4,by+bh-2);
+    const rr=(x0,x1,col)=>{ c.fillStyle=col; c.beginPath(); const w=Math.max(2,x1-x0); if(c.roundRect) c.roundRect(x0,by,w,bh,[0,4,4,0]); else c.rect(x0,by,w,bh); c.fill(); };
+    rr(X(0),X(r.mc),css("--green")); if(r.mt>r.mc+0.5) rr(X(r.mc)+2,X(r.mt),css("--fairway"));
+    if(r.n>1){ c.strokeStyle=ink; c.globalAlpha=0.6; c.lineWidth=1.5; const wy=by+bh+4; c.beginPath(); c.moveTo(X(r.lo),wy); c.lineTo(X(r.hi),wy); c.moveTo(X(r.lo),wy-3); c.lineTo(X(r.lo),wy+3); c.moveTo(X(r.hi),wy-3); c.lineTo(X(r.hi),wy+3); c.stroke(); c.globalAlpha=1; }
+    c.fillStyle=ink; c.font="600 11px "+css("--body"); const lab=`${fmtDist(r.mt)}`, tx=X(r.mt)+6; c.textAlign=tx>W-40?"right":"left"; c.fillText(lab, tx>W-40?X(r.mt)-6:tx, by+bh-3);  });
+}
+function drawKeys(){ const cv=$("keyFrames"); if(!cv) return; const ok=!!(lastPose && shown && lastPose.id===shown.id && SL.Cam && SL.Cam.keyFrames);
+  cv.hidden=!ok; if(!ok || cv.closest("[hidden]")) return; SL.Cam.keyFrames({poseFrames:lastPose.poseFrames, marks:lastPose.marks, posture:lastPose.posture}, cv, lastPose.mirror); }
+function drawCharts(){ drawTrace(); drawField(); drawSide(); drawTrend(); drawGaps(); }
 function renderCalib(){
   const u=fmtSpeed(1).u; $("radarUnit").textContent=u;
   if(lastReal){ const v=toUnit(lastReal.msRaw); $("calibLast").textContent=`Último swing (${CLUBS[lastReal.club].name}, con ${srcOf(lastReal)==="camera"?"la cámara":"el sensor"}), sin calibrar: ${v.toFixed(S.units==="ms"?1:0)} ${u}. ¿Cuánto marcó el radar?`; }
@@ -670,19 +779,19 @@ function renderChips(){ renderShots(); renderQuick(); document.querySelectorAll(
   if((mode==="course"||mode==="range") && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } });
   const cur=document.querySelector('.chip[aria-pressed="true"]'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"}); }catch(_){} 
   document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
-function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawTrace(); drawField(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
+function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
 
 // ================= Resultado de un swing =================
 function handleResult(res){
   lastPeakSeen = res.obs ?? res.peak ?? lastPeakSeen;
   if(res.error){ $("board").classList.add("stale"); setVerdict(res.error); beep(220,0.25); say("No reconocí el swing"); updateLive(); return; }
   const {rawSamples,poseFrames,marks,...h}=res; h.shot=shotFor(h.club);
-  if(poseFrames){ lastPose={poseFrames,marks,posture:h.posture}; $("replayBtn").hidden=false; } else if(!h.sim) { lastPose=null; $("replayBtn").hidden=true; }
+  if(poseFrames){ lastPose={id:h.id, poseFrames,marks,posture:h.posture, mirror:S.camFacing==="user"}; $("replayBtn").hidden=false; } else if(!h.sim) { lastPose=null; $("replayBtn").hidden=true; }
   if(S.invert && !h.sim){ h.face=-h.face; h.path=-h.path; }
   if(!h.sim && h.club==="driver") addEntry("speeds",{v:+derive(h).ms.toFixed(2), src:srcOf(h)});
   if(!h.sim){ history.unshift(h); history=history.slice(0,300); store.set("sl2_hist",history);
     traces.unshift({id:h.id, club:h.club, hz:h.hz, s:rawSamples}); traces=traces.slice(0,25); store.set("sl2_traces",traces); lastReal=h; }
-  shown=h; renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawTrace(); drawField(); renderCalib(); updateLive();
+  shown=h; renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawCharts(); renderCalib(); updateLive();
   if(navigator.vibrate) try{ navigator.vibrate(60); }catch(_){}
   const dv=derive(h), s=fmtSpeed(dv.ms);
   const sh=shapeName(h);
@@ -898,13 +1007,13 @@ function setMode(m){
   if(m==="range") setupRange();
   else if(m==="course"){ if(!course) newRound(); else { builtHole=""; setupHole(false); } renderCourses(); renderScore(); }
   else if(m==="rank") renderRank();
-  else { drawTrace(); drawField(); }
+  else { drawCharts(); }
   if(camState==="on"){ if(m==="rank"){ SL.Cam.pause(true); } camLayer(m!=="rank"); }
   suggestClub(); renderAll();
 }
 document.querySelectorAll(".mode").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode)));
 function selectTab(name){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected",String(t.dataset.tab===name)));
-  document.querySelectorAll(".panel").forEach(p=>p.hidden=p.dataset.panel!==name); drawTrace(); drawField(); }
+  document.querySelectorAll(".panel").forEach(p=>p.hidden=p.dataset.panel!==name); drawCharts(); }
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>selectTab(t.dataset.tab)));
 $("nextHole").addEventListener("click",nextHole);
 $("newRound").addEventListener("click",()=>{ $("card").hidden=true; setHudMsg(null); newRound(); });
@@ -951,7 +1060,7 @@ $("expCsv").addEventListener("click",()=>{
   download(`swing-lab-${stamp()}.csv`,"text/csv",rows.map(r=>r.join(",")).join("\n")); });
 $("expJson").addEventListener("click",()=>{ download(`swing-lab-crudo-${stamp()}.json`,"application/json",JSON.stringify({app:"Swing Lab",version:VERSION,exported:new Date().toISOString(),
   units:"t_ms, gyro x/y/z en °/s y gravedad gx/gy/gz en m/s² (marco del teléfono, gravedad hacia arriba)", modo:S.hold, calib, swings:history, traces},null,1)); });
-window.addEventListener("resize",()=>{ if(has3D) World.resize(); drawTrace(); drawField(); drawMini(); });
+window.addEventListener("resize",()=>{ if(has3D) World.resize(); drawCharts(); drawMini(); });
 
 // ================= Diagrama del swing =================
 function drawSwingViz(){

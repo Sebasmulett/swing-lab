@@ -37,6 +37,7 @@ SL.treeDims = t=>{ const s=t.s; switch(t.kind){
   case "cypress": return {r:3.6*s, y0:3.4*s, y1:6.9*s};
   case "gorse":   return {r:1.8*s, y0:0,     y1:1.4*s};
   case "palm":    return {r:2.2*s, y0:8.2*s, y1:9.8*s};
+  case "euca":    return {r:2.3*s, y0:8.0*s, y1:13.8*s};
   default:        return {r:2.7*s, y0:1.2*s, y1:7.0*s}; } };
 function plant(h, fl, seed){
   const R=rng(seed), out=[], pick=()=>{ let u=R(), acc=0; for(const [k,p] of fl.kinds){ acc+=p; if(u<=acc) return k; } return fl.kinds[0][0]; };
@@ -404,7 +405,7 @@ const COURSES = [
     flora:{kinds:[["cone",.55],["palm",.2],["round",.25]], dens:.9, gap:18, spread:24, rows:2, far:70}, holes:SAW },
   { id:"bogota", name:"Country Club de Bogotá", place:"Los Fundadores · Bogotá, 2.600 m", style:"Altura", si:4, alt:2600, wind:[0,3],
     desc:"Cancha Los Fundadores, 18 hoyos: calles angostas entre árboles, fuera de límites en la izquierda de los primeros hoyos, lagos en el 9, 13, 14 y 18, y la altura de Bogotá: la bola vuela cerca de 10% más.",
-    flora:{kinds:[["round",.55],["cone",.45]], dens:.95, gap:15, spread:20, rows:2, far:80}, scenery:"andes", holes:CCB18 },
+    flora:{kinds:[["round",.4],["cone",.32],["euca",.28]], dens:.95, gap:15, spread:20, rows:2, far:80}, scenery:"andes", holes:CCB18 },
   { id:"cartagena", name:"TPC Cartagena", place:"Karibana · Cartagena, Colombia", style:"Caribe", si:5, alt:0, wind:[3,8],
     desc:"Diseño de Jack Nicklaus junto al mar Caribe, 18 hoyos: agua en casi la mitad de los hoyos y los tres últimos junto al mar (el 16 con el mar por toda la derecha, el 17 corto y lleno de problemas y el 18 de riesgo y premio). Siempre hay brisa.",
     flora:{kinds:[["palm",.6],["round",.4]], dens:.55, gap:22, spread:28, rows:1, far:60}, scenery:"caribe", holes:TPCC18 },

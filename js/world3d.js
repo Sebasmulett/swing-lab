@@ -162,30 +162,101 @@ function makeFlag(){
   return g;
 }
 // Árboles por especie (las alturas coinciden con SL.treeDims, que usa la física para los choques)
+// copa: lóbulos [dx, y, dz, ancho, alto, fondo, tono, saturación, luz] en unidades de escala del árbol
 const TREE_KIND={
-  round:  {trunk:[0.5,1,1],   blobs:[[0,0.62*6.5,0,2.7,2.9,2.7,0.25,0.48,0.2],[0.45*2.7,0.48*6.5,-0.3*2.7,1.9,1.9,1.9,0.24,0.5,0.25]]},
-  cypress:{trunk:[4.6,1.1,1.1], blobs:[[0,5.3,0,3.8,1.5,3.6,0.31,0.38,0.17],[1.6,4.6,0.8,2.6,1.2,2.4,0.30,0.36,0.2],[-1.5,5.0,-0.6,2.4,1.1,2.6,0.32,0.38,0.19]]},
-  gorse:  {trunk:null,          blobs:[[0,0.6,0,1.9,0.9,1.8,0.2,0.42,0.2],[0.9,0.5,0.5,1.2,0.7,1.2,0.16,0.55,0.28]]},
-  palm:   {trunk:[9,0.55,0.55], blobs:[[0,9,0,2.4,0.7,2.4,0.27,0.45,0.27]]},
-  cone:   {trunk:[2.6,1,1],     cone:[1.35,7.5,2.1,0.33,0.42,0.17]} };
+  round:  {trunk:[3.2,1,1],   blobs:[[0.2,4.1,0,3.0,2.7,3.0,0.25,0.48,0.25]]},
+  cypress:{trunk:[4.6,1.1,1.1], blobs:[[0,5.2,0,4.0,1.4,3.8,0.31,0.38,0.21],[1.4,4.7,0.8,2.6,1.1,2.4,0.30,0.36,0.23]]},
+  gorse:  {trunk:null,          blobs:[[0.3,0.6,0.2,2.1,0.9,2.0,0.2,0.42,0.25]]},
+  palm:   {trunk:[9,0.55,0.55], palm:true},
+  euca:   {trunk:[9.5,1.15,1.15], pale:true, blobs:[[0,10.8,0,3.1,3.0,3.0,0.27,0.34,0.27],[0.4,12.8,-0.3,2.0,1.8,2.0,0.27,0.3,0.31]]},
+  cone:   {trunk:[2.6,1,1],     cone:[1.35,7.5,2.1,0.33,0.42,0.2]} };
+// ruido fijo por posición (los vértices repetidos se mueven igual: la malla no se abre)
+const hash3=(x,y,z)=>{ const v=Math.sin(x*127.1+y*311.7+z*74.7)*43758.5453; return v-Math.floor(v); };
+function mergeGeos(list){ let n=0; list.forEach(g=>n+=g.attributes.position.count); const pos=new Float32Array(n*3), col=new Float32Array(n*3); let o=0;
+  list.forEach(g=>{ pos.set(g.attributes.position.array,o*3); if(g.attributes.color) col.set(g.attributes.color.array,o*3); else col.fill(1,o*3,(o+g.attributes.position.count)*3); o+=g.attributes.position.count; });
+  const out=new T.BufferGeometry(); out.setAttribute("position",new T.BufferAttribute(pos,3)); out.setAttribute("color",new T.BufferAttribute(col,3)); out.computeVertexNormals(); return out; }
+// copa "esponjosa": varios lóbulos de icosaedro con borde irregular, más oscura abajo (sombra propia) y clara arriba
+function crownGeo(seed, low){
+  const Rn=SL.rng(seed), parts=[], nL=low?3:4+Math.floor(Rn()*2);
+  for(let k=0;k<nL;k++){ const g=new T.IcosahedronGeometry(1,!low&&k<1?1:0).toNonIndexed(), r=k===0?0.78:0.42+Rn()*0.28, a=Rn()*Math.PI*2, d=k===0?0:0.38+Rn()*0.3, oy=k===0?0:(Rn()-0.3)*0.55;
+    const P=g.attributes.position; for(let i=0;i<P.count;i++){ const x=P.getX(i), y=P.getY(i), z=P.getZ(i), nz=1+(hash3(x+k,y,z)-0.5)*0.32;
+      P.setXYZ(i, x*r*nz+Math.cos(a)*d, y*r*nz*0.92+oy, z*r*nz+Math.sin(a)*d); } parts.push(g); }
+  const g=mergeGeos(parts), P=g.attributes.position, C=g.attributes.color; let y0=1e9,y1=-1e9; for(let i=0;i<P.count;i++){ y0=Math.min(y0,P.getY(i)); y1=Math.max(y1,P.getY(i)); }
+  for(let i=0;i<P.count;i++){ const u=(P.getY(i)-y0)/(y1-y0||1), v=0.5+0.62*Math.pow(u,0.8)+(hash3(P.getX(i),P.getY(i),P.getZ(i))-0.5)*0.12; C.setXYZ(i,v,v,v); }
+  return g; }
+// pino: tres pisos de conos con el borde dentado
+function pineGeo(){ const parts=[];
+  [[0.0,1.0,0.55],[0.32,0.78,0.45],[0.6,0.52,0.4]].forEach(([y,r,h],k)=>{ const g=new T.ConeGeometry(r,h,9,1,true).toNonIndexed(); g.translate(0,y+h/2,0);
+    const P=g.attributes.position, C=new Float32Array(P.count*3); for(let i=0;i<P.count;i++){ const yy=P.getY(i), base=yy<y+0.01; if(base){ const x=P.getX(i), z=P.getZ(i), j=1+(hash3(x,k,z)-0.5)*0.35; P.setXYZ(i,x*j,yy-0.04*hash3(z,x,k),z*j); }
+      const v=base?0.55:0.95+0.15*k/2; C[i*3]=C[i*3+1]=C[i*3+2]=v; } g.setAttribute("color",new T.BufferAttribute(C,3)); parts.push(g); });
+  return mergeGeos(parts); }
+// hojas de palma: 9 frondas que se doblan hacia abajo, con la nervadura más clara
+function frondGeo(){ const pos=[], col=[], N=8, segs=5;
+  for(let f=0;f<N;f++){ const a=f/N*Math.PI*2+(f%2)*0.2, ca=Math.cos(a), sa=Math.sin(a), len=0.85+0.15*((f*7)%3)/2, droop=0.9+0.25*((f*5)%3)/2;
+    const at=u=>{ const r=u*len, y=0.35*Math.sin(u*Math.PI*0.9)-droop*u*u; return [r,y]; };
+    for(let k=0;k<segs;k++){ const u0=k/segs, u1=(k+1)/segs, [r0,y0]=at(u0), [r1,y1]=at(u1), w0=0.2*Math.sin(Math.PI*Math.min(1,u0*1.15)), w1=0.2*Math.sin(Math.PI*Math.min(1,u1*1.15));
+      const P=(r,y,w,dy)=>[ca*r-sa*w, y+dy, sa*r+ca*w];
+      const c0=0.75+0.35*u0, c1=0.75+0.35*u1, edge=0.6;
+      for(const sd of [-1,1]){ const a0=P(r0,y0,0,0.03), a1=P(r1,y1,0,0.03), b0=P(r0,y0,sd*w0,-0.06*w0*5), b1=P(r1,y1,sd*w1,-0.06*w1*5);
+        pos.push(...a0,...b0,...a1, ...a1,...b0,...b1); col.push(c0,c0,c0, edge*c0,edge*c0,edge*c0, c1,c1,c1, c1,c1,c1, edge*c0,edge*c0,edge*c0, edge*c1,edge*c1,edge*c1); } } }
+  const g=new T.BufferGeometry(); g.setAttribute("position",new T.Float32BufferAttribute(pos,3)); g.setAttribute("color",new T.Float32BufferAttribute(col,3)); g.computeVertexNormals(); return g; }
+// vaivén con el viento (en el sombreador: cada árbol con su propia fase, más arriba se mueve más)
+const treeU={uTime:{value:0}, uAmp:{value:0.4}};
+function swayMat(opts){ const m=new T.MeshPhongMaterial(Object.assign({color:0xffffff, vertexColors:true, flatShading:true, shininess:3, specular:0x0a0a0a},opts||{}));
+  m.onBeforeCompile=sh=>{ sh.uniforms.uTime=treeU.uTime; sh.uniforms.uAmp=treeU.uAmp;
+    sh.vertexShader="uniform float uTime; uniform float uAmp;\n"+sh.vertexShader.replace("#include <begin_vertex>",`#include <begin_vertex>
+    #ifdef USE_INSTANCING
+      vec3 ip=instanceMatrix[3].xyz; float ph=ip.x*0.071+ip.z*0.053;
+      float hk=max(0.0,position.y+1.0);
+      transformed.x+=(sin(uTime*1.7+ph)*0.6+sin(uTime*2.9+ph*1.7)*0.25)*uAmp*hk*0.05;
+      transformed.z+=cos(uTime*1.3+ph*1.3)*uAmp*hk*0.035;
+    #endif`); };
+  return m; }
+let GEO=null;
+function treeGeos(){ if(GEO) return GEO;
+  const trunk=new T.CylinderGeometry(0.13,0.26,1,7,3); trunk.translate(0,0.5,0);
+  { const P=trunk.attributes.position; for(let i=0;i<P.count;i++){ const y=P.getY(i); P.setX(i,P.getX(i)+Math.sin(y*4.1)*0.04); P.setZ(i,P.getZ(i)+Math.cos(y*3.3)*0.04); } trunk.computeVertexNormals(); }
+  const palmT=new T.CylinderGeometry(0.16,0.24,1,7,6); palmT.translate(0,0.5,0);
+  { const P=palmT.attributes.position; for(let i=0;i<P.count;i++){ const y=P.getY(i); P.setX(i,P.getX(i)+0.18*y*y); } palmT.computeVertexNormals(); }   // tronco curvo
+  GEO={trunk, palmT, crowns:[crownGeo(11),crownGeo(23),crownGeo(37),crownGeo(51,true)], pine:pineGeo(), frond:frondGeo(), nut:new T.IcosahedronGeometry(0.22,0)}; return GEO; }
 function trees(list){
-  const grp=new T.Group(), Rn=SL.rng(7);
-  const trunkGeo=new T.CylinderGeometry(0.16,0.28,1,6); trunkGeo.translate(0,0.5,0);
-  const canGeo=new T.IcosahedronGeometry(1,1), coneGeo=new T.ConeGeometry(1,1,8); coneGeo.translate(0,0.5,0);
-  const nT=list.filter(t=>TREE_KIND[t.kind]?.trunk!==null).length, nB=list.reduce((a,t)=>a+((TREE_KIND[t.kind]||TREE_KIND.round).blobs||[]).length,0), nC=list.filter(t=>t.kind==="cone").length;
-  const trunks=new T.InstancedMesh(trunkGeo,new T.MeshLambertMaterial({color:0x5b4430}),Math.max(1,nT));
-  const can=new T.InstancedMesh(canGeo,new T.MeshPhongMaterial({color:0xffffff, flatShading:true, shininess:4, specular:0x111111}),Math.max(1,nB));
-  const cones=new T.InstancedMesh(coneGeo,new T.MeshPhongMaterial({color:0xffffff, flatShading:true, shininess:4, specular:0x111111}),Math.max(1,nC));
-  const m=new T.Matrix4(), q=new T.Quaternion(), sc=new T.Vector3(), p=new T.Vector3(), col=new T.Color(), Y=new T.Vector3(0,1,0);
-  let it=0, ib=0, ic=0;
+  const grp=new T.Group(), Rn=SL.rng(7), G=treeGeos();
+  // copa: tres variantes cerca y una más liviana para el bosque de fondo
+  const vOf=(t,k)=>t.deco?3:(k+Math.floor(t.hue*7))%3;
+  let nT=0, nP=0, nC=0, nF=0; const nB=[0,0,0,0];
+  for(const t of list){ const K=TREE_KIND[t.kind]||TREE_KIND.round; if(K.palm){ nP++; nF++; } else if(K.trunk) nT++; if(K.cone) nC++; (K.blobs||[]).forEach((b,k)=>nB[vOf(t,k)]++); }
+  const bark=new T.MeshLambertMaterial({color:0xffffff, vertexColors:false});
+  const trunks=new T.InstancedMesh(G.trunk,bark,Math.max(1,nT)), palms=new T.InstancedMesh(G.palmT,new T.MeshLambertMaterial({color:0x8a7356}),Math.max(1,nP));
+  const crowns=G.crowns.map((g,k)=>new T.InstancedMesh(g,swayMat(),Math.max(1,nB[k]))), cones=new T.InstancedMesh(G.pine,swayMat(),Math.max(1,nC));
+  const fronds=new T.InstancedMesh(G.frond,swayMat({side:T.DoubleSide}),Math.max(1,nF)), nuts=new T.InstancedMesh(G.nut,new T.MeshLambertMaterial({color:0x5a4526}),Math.max(1,nF));
+  const m=new T.Matrix4(), q=new T.Quaternion(), q2=new T.Quaternion(), sc=new T.Vector3(), p=new T.Vector3(), col=new T.Color(), Y=new T.Vector3(0,1,0), E=new T.Euler();
+  let it=0, ip=0, ic=0, iF=0; const ib=[0,0,0,0];
   for(const t of list){ const K=TREE_KIND[t.kind]||TREE_KIND.round, s=t.s, rot=t.hue*9; q.setFromAxisAngle(Y,rot); const c=Math.cos(rot), sn=Math.sin(rot);
-    if(K.trunk){ m.compose(p.set(t.x,0,t.z),q,sc.set(s*K.trunk[1],K.trunk[0]*s,s*K.trunk[2])); trunks.setMatrixAt(it++,m); }
-    for(const b of (K.blobs||[])){ const dx=b[0]*s, dz=b[2]*s; m.compose(p.set(t.x+dx*c+dz*sn,b[1]*s,t.z-dx*sn+dz*c),q,sc.set(b[3]*s,b[4]*s,b[5]*s)); can.setMatrixAt(ib,m);
-      const yel=t.kind==="gorse" && Rn()<0.35; col.setHSL(yel?0.15:b[6]+t.hue*0.05, yel?0.6:b[7], b[8]+t.hue*0.07); can.setColorAt(ib++,col); }
-    if(K.cone){ const k=K.cone; m.compose(p.set(t.x,k[0]*s,t.z),q,sc.set(k[2]*s,k[1]*s,k[2]*s)); cones.setMatrixAt(ic,m); col.setHSL(k[3]+t.hue*0.04,k[4],k[5]+t.hue*0.06); cones.setColorAt(ic++,col); } }
-  trunks.count=it; can.count=ib; cones.count=ic;
-  grp.add(trunks,can,cones); return grp;
+    if(K.palm){ // palma: tronco curvo e inclinado, frondas y cocos arriba
+      const H=K.trunk[0]*s*(0.9+t.hue*0.2), sx=s*K.trunk[1]*1.6, lean=0.06+t.hue*0.14;
+      E.set(0,rot,-lean,"YXZ"); q2.setFromEuler(E); m.compose(p.set(t.x,0,t.z),q2,sc.set(sx,H,sx)); palms.setMatrixAt(ip++,m);
+      const top=new T.Vector3(0.18*sx,H,0).applyQuaternion(q2).add(new T.Vector3(t.x,0,t.z));
+      E.set((t.hue-0.5)*0.25,rot*1.7,(t.hue-0.5)*0.25); q2.setFromEuler(E); m.compose(p.copy(top),q2,sc.set(4.2*s,3.2*s,4.2*s)); fronds.setMatrixAt(iF,m);
+      col.setHSL(0.24+t.hue*0.05,0.5,0.3+t.hue*0.06); fronds.setColorAt(iF,col);
+      m.compose(p.set(top.x,top.y-0.35*s,top.z),q2,sc.set(s,s,s)); nuts.setMatrixAt(iF++,m); continue; }
+    if(K.trunk){ m.compose(p.set(t.x,0,t.z),q,sc.set(s*K.trunk[1],K.trunk[0]*s,s*K.trunk[2])); trunks.setMatrixAt(it,m);
+      col.setHSL(K.pale?0.09:0.07, K.pale?0.12:0.32, K.pale?0.62:0.26+t.hue*0.06); trunks.setColorAt(it++,col); }
+    (K.blobs||[]).forEach((b,k)=>{ const v=vOf(t,k), dx=b[0]*s, dz=b[2]*s; q2.setFromAxisAngle(Y,rot+k*1.9);
+      m.compose(p.set(t.x+dx*c+dz*sn,b[1]*s,t.z-dx*sn+dz*c),q2,sc.set(b[3]*s,b[4]*s,b[5]*s)); crowns[v].setMatrixAt(ib[v],m);
+      const yel=t.kind==="gorse" && Rn()<0.35; col.setHSL(yel?0.14:b[6]+t.hue*0.05, yel?0.75:b[7], (yel?0.5:b[8])+t.hue*0.06); crowns[v].setColorAt(ib[v]++,col); });
+    if(K.cone){ const k=K.cone; m.compose(p.set(t.x,k[0]*s,t.z),q,sc.set(k[2]*s*1.35,k[1]*s,k[2]*s*1.35)); cones.setMatrixAt(ic,m); col.setHSL(k[3]+t.hue*0.04,k[4],k[5]+t.hue*0.06); cones.setColorAt(ic++,col); } }
+  trunks.count=it; palms.count=ip; cones.count=ic; fronds.count=iF; nuts.count=iF; crowns.forEach((cm,k)=>cm.count=ib[k]);
+  grp.add(trunks,palms,cones,fronds,nuts,...crowns); return grp;
 }
+// bosque de fondo (solo se ve, no choca con la bola): llena los costados lejos del juego
+function backdrop(h){ const R=SL.rng(h.seed*7+3), out=[], kinds=h.trees.length?h.trees.map(t=>t.kind):["round"], cs=h.cs, L=cs[cs.length-1].s;
+  const free=(x,z)=>!h.water.some(w=>SL.geo.inPoly(w.pts,x,z)) && !h.trees.some(t=>Math.abs(t.x-x)<5 && Math.abs(t.z-z)<5) && SL.lieAt(h,x,z)!=="fairway" && SL.lieAt(h,x,z)!=="green";
+  for(let i=0;i<cs.length;i+=3){ const c=cs[i]; let base=24; for(const f of h.fairSamples){ const d=Math.hypot(f.x-c.x,f.z-c.z); if(d<26) base=Math.max(base,f.w+d*0.5+10); }
+    for(const side of [-1,1]) for(let r=0;r<2;r++){ const off=base+55+r*28+R()*30, x=c.x+c.nx*side*off+(R()-0.5)*10, z=c.z+c.nz*side*off+(R()-0.5)*10;
+      if(free(x,z)) out.push({x,z,s:0.95+R()*0.8, kind:kinds[Math.floor(R()*kinds.length)], hue:R(), deco:true}); } }
+  for(let k=0;k<26;k++){ const a=(R()-0.5)*2.4, d=45+R()*70, c=cs[cs.length-1], x=c.x+Math.sin(a)*d, z=c.z+Math.cos(a)*d+10;   // detrás del green
+    if(free(x,z)) out.push({x,z,s:1+R()*0.8, kind:kinds[Math.floor(R()*kinds.length)], hue:R(), deco:true}); }
+  return out; }
 function signTex(text, sub){
   const c=document.createElement("canvas"); c.width=256; c.height=128; const x=c.getContext("2d");
   x.fillStyle="#123326"; x.fillRect(0,0,256,128); x.strokeStyle="#f2c230"; x.lineWidth=6; x.strokeRect(6,6,244,116);
@@ -259,9 +330,9 @@ function makeWaterNormal(){ const N=128, c=document.createElement("canvas"); c.w
     im.data[o]=128+a*60; im.data[o+1]=128+b*60; im.data[o+2]=230; im.data[o+3]=255; }
   x.putImageData(im,0,0); const t=new T.CanvasTexture(c); t.wrapS=t.wrapT=T.RepeatWrapping; t.__keep=true; c.__keep=true; return t; }
 W3.setHole=function(h){
-  if(!W3.ok) return; def={kind:"hole", h, trees:h.trees}; clearWorld();
+  if(!W3.ok) return; def={kind:"hole", h, trees:h.trees.concat(backdrop(h))}; clearWorld();
   const B=mapBounds(); def.B=B; const tex=paint(B); world.add(groundPlane(B,tex,0,-1));
-  world.add(trees(h.trees));
+  world.add(trees(def.trees));
   const inB=(p,m)=>p.x>B.x0-m && p.x<B.x1+m && p.z>B.z0-m && p.z<B.z1+m;
   // agua (mar, lagos y arroyos)
   waterMats=[]; if(!waterNormal) waterNormal=makeWaterNormal();
@@ -409,6 +480,7 @@ function update(dt){
     C.tPos=new T.Vector3(p.x, hgt, p.z); C.tLook=new T.Vector3(e>0.8?h.pinX:q.x, 0, e>0.8?h.L:q.z); C.rate=3; C.lookRate=2.5;
     if(!F.started){ F.started=true; C.pos.copy(C.tPos); C.look.copy(C.tLook); }
     if(u>=1){ const cb=F.onEnd; S.fly=null; cb&&cb(); } }
+  treeU.uTime.value=now; treeU.uAmp.value=0.25+Math.min(8,Math.hypot(S.wind.x,S.wind.z))*0.12;
   if(waterMats.length && waterNormal){ waterNormal.offset.x=(now*0.012)%1; waterNormal.offset.y=(now*0.007)%1; }
   // cámara suave
   if(C.tPos){ C.pos.lerp(C.tPos,1-Math.exp(-dt*C.rate)); }
@@ -444,6 +516,7 @@ let lastDraw=0; W3.idleFps=0;
 function loop(){ requestAnimationFrame(loop); if(!W3.active || document.hidden) return;
   const now=performance.now(); if(W3.idleFps && !S.anim && !S.putt && now-lastDraw<1000/W3.idleFps) return;
   lastDraw=now; const dt=Math.min(W3.idleFps?0.12:0.05,clock.getDelta()); update(dt); R.render(scene,camera); }
+W3.stats=()=>R?{tris:R.info.render.triangles, calls:R.info.render.calls}:null;
 W3.resize=function(){ if(!W3.ok) return; const w=canvas.clientWidth||1, h=canvas.clientHeight||1; R.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
   [trOuter,trCore,aimLine,...linePool].forEach(l=>l&&l.res(w,h)); };
 W3.setActive=function(a){ W3.active=a; if(a) W3.resize(); };

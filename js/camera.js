@@ -20,7 +20,12 @@ function toFrame(lm, wl, t, W, H){
   for(const [k,i] of Object.entries(K)){ const L=lm[i]; f.p[k]=[L.x*W, L.y*H]; f.v[k]=L.visibility??1; if(wl && wl[i]) f.m[k]=[wl[i].x, wl[i].y, wl[i].z]; }
   return f;
 }
-const visibleBody=f=>["ls","rs","lw","rw","lh","rh"].every(k=>f.v[k]>0.45);
+// De perfil (cámara detrás) el hombro, la cadera y la muñeca del lado lejano quedan tapados por el cuerpo:
+// basta con ver bien el lado cercano de cada par.
+let VIEW="front";
+const vis2=(f,a,b,th)=>Math.max(f.v[a]??0,f.v[b]??0)>th;
+const visibleBody=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.5) && vis2(f,"lh","rh",0.5) && vis2(f,"lw","rw",0.4) && Math.min(f.v.lw??0,f.v.rw??0)>0.12
+                                        : ["ls","rs","lw","rw","lh","rh"].every(k=>f.v[k]>0.45);
 
 // ---------------- utilidades numéricas ----------------
 // mínimos cuadrados polinómicos (coeficientes a0..adeg)
@@ -234,8 +239,18 @@ SL.analyzePose=function(F, clubKey, opts={}){
     const spineA=spineOf(atA(shC),hA), spineI=spineOf(atI(shC),hI);
     const hipThrust=(hI[0]-hA[0])*out*mPerPx*100, headDrop=(nI[1]-nA[1])*mPerPx*100, headIn=(nI[0]-nA[0])*out*mPerPx*100;
     const L0=Hn[a], L1=Sh[a], dl=[L1[0]-L0[0],L1[1]-L0[1]], ln=Math.hypot(...dl)||1;
-    const planeTop=((Hn[top][0]-L0[0])*dl[1]-(Hn[top][1]-L0[1])*dl[0])/ln*out*mPerPx*100;   // >0: manos del lado de la bola (subida vertical)
-    posture={dtl:true, spine:Math.round(spineA), spineChg:Math.round(spineI-spineA), hipThrust:Math.round(hipThrust), headDrop:Math.round(headDrop), headIn:Math.round(headIn), planeTop:Math.round(planeTop),
+    // signo: >0 = del lado de la bola / por encima de la línea (con la línea subiendo hacia el cuerpo, ambos son el mismo lado)
+    const planeTop=-((Hn[top][0]-L0[0])*dl[1]-(Hn[top][1]-L0[1])*dl[0])/ln*out*mPerPx*100;   // >0: manos del lado de la bola (subida vertical)
+    // Bucle de las manos: a la misma altura sobre la línea del plano, ¿la bajada pasa por fuera (por encima) o por dentro (por debajo) de la subida?
+    // Por fuera = "por encima" (over the top), tiende a ruta de afuera hacia adentro; por dentro = la bajada se aplana, tiende a de adentro hacia afuera.
+    const perp=H=>-((H[0]-L0[0])*dl[1]-(H[1]-L0[1])*dl[0])/ln*out, along=H=>((H[0]-L0[0])*dl[0]+(H[1]-L0[1])*dl[1])/ln;
+    let loop=null; { const sTop=along(Hn[top]);
+      if(sTop>0.3*ln){ const bk=[], dn=[]; for(let i=st;i<=top;i++) bk.push([along(Hn[i]),perp(Hn[i])]); for(let i=top;i<=imp;i++) dn.push([along(Hn[i]),perp(Hn[i])]);
+        // perpendicular interpolada a una altura dada (toma el primer cruce en la subida y el primero en la bajada)
+        const at=(seq,sv,up)=>{ for(let k=1;k<seq.length;k++){ const a0=seq[k-1], a1=seq[k]; if(up? (a0[0]<=sv && a1[0]>=sv) : (a0[0]>=sv && a1[0]<=sv)){ const f=(sv-a0[0])/((a1[0]-a0[0])||1e-9); return a0[1]+(a1[1]-a0[1])*f; } } return null; };
+        const d=[]; for(let k=0;k<=10;k++){ const sv=sTop*(0.25+0.5*k/10), pb=at(bk,sv,true), pd=at(dn,sv,false); if(pb!=null && pd!=null) d.push(pd-pb); }
+        if(d.length>=6) loop=median(d)*mPerPx*100; } }
+    posture={dtl:true, spine:Math.round(spineA), spineChg:Math.round(spineI-spineA), hipThrust:Math.round(hipThrust), headDrop:Math.round(headDrop), headIn:Math.round(headIn), planeTop:Math.round(planeTop), loop:loop==null?null:Math.round(loop),
       lines:{hand:L0, sh:L1, hip:Hp[a]}};
   }
   const arcTop=Math.round(ang[top]/DEG), arcFin=Math.round((view==="behind"?ang[fin]:-ang[fin])/DEG);
@@ -250,7 +265,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
     posture, camQ, hz:Math.round(fps), impSrc, tImpAbs:tImp, tTopAbs:t[top], handPeakMs, handDrop:handDrop==null?null:+handDrop.toFixed(2),
     trace:{ t:t.slice(i0,i1+1).map(v=>v-t[i0]), d:ang.slice(i0,i1+1).map(v=>v/DEG), phi:ang.slice(i0,i1+1).map(v=>+(v/DEG).toFixed(1)),
             start:st-i0, top:top-i0, imp:imp-i0, fin:fin-i0, signed:true },
-    poseFrames: F.slice(Math.max(0,a-8), Math.min(n,fin+10)).map(f=>({t:f.t, w:f.w, h:f.h, p:f.p})),
+    poseFrames: F.slice(Math.max(0,a-8), Math.min(n,fin+10)).map(f=>({t:f.t, w:f.w, h:f.h, p:f.p, img:f.img||null})),
     marks:{a, st, top, imp, fin, t0:F[Math.max(0,a-8)].t}
   };
 };
@@ -304,11 +319,11 @@ async function loadModel(kind){
   if(landmarker) try{ landmarker.close(); }catch(_){}
   landmarker=lm; modelKind=kind; Cam.model=kind; detTimes=[];
 }
-Cam.setView=v=>{ opts.view=v; Cam.addrLines=null; };
+Cam.setView=v=>{ opts.view=v; VIEW=v||"front"; Cam.addrLines=null; };
 Cam.supported=()=>!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 Cam.setMock=fn=>{ mock=fn; };   // pruebas: función (t)=>cuadro
 Cam.start=async function(o){
-  opts=o||{}; cb=opts; video=document.getElementById("camVideo"); canvas=document.getElementById("camCanvas"); ctx=canvas.getContext("2d");
+  opts=o||{}; cb=opts; VIEW=opts.view||"front"; video=document.getElementById("camVideo"); canvas=document.getElementById("camCanvas"); ctx=canvas.getContext("2d");
   Cam.loading=true; status("Cargando el detector de movimiento… (solo tarda la primera vez)","wait");
   try{
     if(!mock){
@@ -327,6 +342,7 @@ Cam.start=async function(o){
       else { Cam.shutter=null; Cam.shutterTxt="automático"; }
     }
   }catch(e){ Cam.loading=false; stopStream(); status(e && e.name==="NotAllowedError" ? "Sin permiso para usar la cámara. Actívalo en los ajustes del navegador." : "No pude iniciar la cámara o el detector ("+(e&&e.message||e)+"). Revisa la conexión la primera vez.","bad"); cb.onError&&cb.onError(e); return false; }
+  if(!mock) window.addEventListener("devicemotion",onMotion);
   Cam.loading=false; Cam.on=true; st="seek"; buf=[]; trail=[]; coolUntil=0; stillSince=null; lastT=0; lastPF=null; Cam.drops=0;
   video.classList.toggle("mirror", (opts.facing||"user")==="user"); canvas.classList.toggle("mirror", (opts.facing||"user")==="user");
   schedule(); return true;
@@ -363,7 +379,12 @@ async function tuneShutter(tr){
   try{ await tr.applyConstraints({advanced:[Object.assign({}, adv, {exposureMode:"continuous"})]}); }catch(e){}
   Cam.shutter=false; Cam.shutterTxt="automático (poca luz)";
 }
-function stopStream(){ if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
+// nivel del teléfono (con la gravedad del acelerómetro): ladeado, la línea del plano y la columna salen torcidas
+function onMotion(e){ const g=e.accelerationIncludingGravity; if(!g || g.x==null) return;
+  const ang=(screen.orientation && screen.orientation.angle) ?? (window.orientation||0), land=Math.abs(ang)%180===90;
+  const a=land?g.y:g.x, b=land?g.x:g.y; if(Math.abs(g.z)>7 || Math.abs(b)<5){ Cam.tilt=null; return; }
+  const t=Math.atan2(a,Math.abs(b))/DEG; Cam.tilt = Cam.tilt==null ? t : Cam.tilt*0.85+t*0.15; }
+function stopStream(){ window.removeEventListener("devicemotion",onMotion); Cam.tilt=null; if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
 Cam.stop=function(){ Cam.on=false; cancelAnimationFrame(raf); raf=0; if(vfc && video && video.cancelVideoFrameCallback) try{ video.cancelVideoFrameCallback(vfc); }catch(_){} vfc=0; stopStream(); st="idle"; lockUntil=0; status(null); if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height); };
 // pausa la lectura (para apuntar o mientras vuela la bola); al seguir, da unos segundos para ponerse en posición
 Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ st="seek"; stillSince=null; readyHip=null; return; }
@@ -385,6 +406,16 @@ function onVideoFrame(now, meta){ schedule(); if(!Cam.on || switching) return;
   let t=now; if(meta){ if(meta.captureTime) t=meta.captureTime; else if(meta.mediaTime!=null){ if(Cam._off==null) Cam._off=now-meta.mediaTime*1000; t=meta.mediaTime*1000+Cam._off; } }
   let k=null; if(meta && meta.presentedFrames!=null){ k=meta.presentedFrames; if(lastPF!=null && k-lastPF>1) Cam.drops+=k-lastPF-1; lastPF=k; }
   detect(t, k, !!meta); }
+// Fotos pequeñas de cada cuadro (anillo de lienzos reutilizados) para la repetición con video real y los cuadros clave
+const RING_N=210, THUMB=168; let ring=[], ringI=0, ringSeq=0;
+function grab(){ if(!video || !video.videoWidth || opts.thumbs===false) return null;
+  const vw=video.videoWidth, vh=video.videoHeight, k=THUMB/Math.max(vw,vh), w=Math.round(vw*k), h=Math.round(vh*k);
+  let c=ring[ringI]; if(!c){ c=document.createElement("canvas"); ring[ringI]=c; } if(c.width!==w||c.height!==h){ c.width=w; c.height=h; }
+  try{ c.getContext("2d").drawImage(video,0,0,w,h); }catch(e){ return null; }
+  ringI=(ringI+1)%RING_N; c._seq=++ringSeq; return c; }
+// al terminar un swing, sus fotos pasan a ser del swing (el anillo sigue con lienzos nuevos)
+function keepThumbs(frames){ const own=new Set(); for(const f of frames){ if(f.img && f.img._seq===f.imgSeq) own.add(f.img); else f.img=null; }
+  if(own.size) ring=ring.map(c=>own.has(c)?null:c); }
 function detect(t, k, exact){
   if(t<=lastT) t=lastT+0.5; lastT=t;
   let res=null; const d0=performance.now(); try{ res=landmarker.detectForVideo(video, t); }catch(e){ return; }
@@ -395,7 +426,7 @@ function detect(t, k, exact){
   const W=video.videoWidth, H=video.videoHeight; let f;
   if(res && res.landmarks && res.landmarks[0]) f=toFrame(res.landmarks[0], res.worldLandmarks&&res.worldLandmarks[0], t, W, H);
   else f={t, w:W, h:H, none:true};
-  f.exact=exact; if(k!=null) f.k=k; handle(f);
+  f.exact=exact; if(k!=null) f.k=k; const im=grab(); if(im){ f.img=im; f.imgSeq=im._seq; } handle(f);
 }
 function handle(f){
   const now=f.t; fpsTimes.push(now); if(fpsTimes.length>40) fpsTimes.shift(); if(fpsTimes.length>5) Cam.fps=Math.round((fpsTimes.length-1)/((fpsTimes[fpsTimes.length-1]-fpsTimes[0])/1000));
@@ -406,7 +437,9 @@ function missingHint(f){
   if(f.none || !f.v) return "No te veo: ponte frente a la cámara, a 2 o 3 metros";
   if((f.v.la??1)<0.45 && (f.v.ra??1)<0.45) return "No veo tus pies: aleja el teléfono o apúntalo un poco más abajo";
   if((f.v.nose??1)<0.45) return "No veo tu cabeza: aleja el teléfono o apúntalo un poco más arriba";
-  if(["lw","rw"].some(k=>f.v[k]<0.45)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
+  if(VIEW==="behind"){ if(!vis2(f,"lw","rw",0.4)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
+    if(!vis2(f,"ls","rs",0.5)||!vis2(f,"lh","rh",0.5)) return "No te veo completo: el teléfono detrás de ti, a unos 3 metros, con todo tu cuerpo en la imagen"; }
+  else if(["lw","rw"].some(k=>f.v[k]<0.45)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
   return "No te veo completo: ponte a 2 o 3 metros, con todo el cuerpo en la imagen"; }
 function setupHint(f){
   const p=f.p, W=f.w||1, H=f.h||1, sw=dist(p.ls,p.rs), tor=dist(mid(p.ls,p.rs),mid(p.lh,p.rh))||1, r=sw/tor;
@@ -416,11 +449,16 @@ function setupHint(f){
   if(cx<0.22 || cx>0.78) return "Muévete al centro de la imagen";
   if(opts.view!=="behind" && r<0.42) return "Ponte de frente a la cámara (el objetivo a un lado)";
   if(opts.view==="behind" && r>0.62) return "Para la vista desde atrás, la cámara va detrás de ti, mirando al objetivo";
-  if(opts.view==="behind"){ const hy=mid(p.lw,p.rw)[1]/H; if(hy<0.35) return "Baja el teléfono: a la altura de tus manos"; if(hy>0.85) return "Sube el teléfono: a la altura de tus manos"; }
+  if(opts.view==="behind"){ const hy=mid(p.lw,p.rw)[1]/H; if(hy<0.35) return "Baja el teléfono: a la altura de tus manos"; if(hy>0.85) return "Sube el teléfono: a la altura de tus manos";
+    // sobre la línea de tiro los pies se ven uno detrás del otro; si se separan de lado, la cámara quedó corrida
+    if((f.v.la??0)>0.5 && (f.v.ra??0)>0.5 && p.la && p.ra){ const out=Math.sign(mid(p.lw,p.rw)[0]-mid(p.lh,p.rh)[0])||1, far=p.la[1]<p.ra[1]?p.la:p.ra, near=far===p.la?p.ra:p.la, k=(far[0]-near[0])*out/tor;
+      if(k>0.5) return "Corre el teléfono un poco hacia tu lado: debe quedar sobre la línea de tiro, detrás de tus manos";
+      if(k<-0.25) return "Corre el teléfono un poco hacia la bola: debe quedar sobre la línea de tiro, detrás de tus manos"; } }
+  if(Cam.tilt!=null && Math.abs(Cam.tilt)>7) return `Endereza el teléfono: está ladeado ${Math.round(Math.abs(Cam.tilt))}°`;
   return null; }
 // máquina de estados: buscar cuerpo → quieto en address → swing → final
 // Solo se dispara desde "listo" (quieto en address): caminar o acomodarse ya no se confunde con un swing.
-const coreVisible=f=>["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
+const coreVisible=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.4) && vis2(f,"lh","rh",0.4) : ["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
 let readyHip=null, viewVotes=0;
 function step(f){
   const now=f.t;
@@ -448,10 +486,12 @@ function step(f){
     if(st==="ready" && (opts.view==="behind")) Cam.addrLines={hand:mid(f.p.lw,f.p.rw), sh:mid(f.p.ls,f.p.rs), hip:mid(f.p.lh,f.p.rh)};
     if(st==="seek") Cam.addrLines=null;
   } else if(st==="capture"){
-    trail.push({t:now, p:hand}); while(trail.length && now-trail[0].t>1600) trail.shift();
+    // fase del trazo: subida hasta el punto más alto; bajada cuando las manos ya cayeron un poco desde ahí
+    const minY=trail.reduce((m,q)=>Math.min(m,q.p[1]),hand[1]), down=trail.length>3 && hand[1]>minY+0.12*torso && trail.some(q=>q.p[1]<=minY+0.02*torso && q.t<now-60);
+    trail.push({t:now, p:hand, d:down || (trail.length && trail[trail.length-1].d)}); while(trail.length && now-trail[0].t>1600) trail.shift();
     if(v<0.35){ if(quietSince==null) quietSince=now; } else quietSince=null;
     if((quietSince!=null && now-quietSince>=450 && now-capStart>600) || now-capStart>3800){
-      const frames=buf.slice(); st="seek"; stillSince=null; readyHip=null; coolUntil=now+1200; Cam.graceMsg=null; trail=[];
+      const frames=buf.slice(); keepThumbs(frames); st="seek"; stillSince=null; readyHip=null; coolUntil=now+1200; Cam.graceMsg=null; trail=[];
       cb.onSwing && cb.onSwing(frames);
     }
   }
@@ -471,7 +511,8 @@ function draw(f){
   if(f.none || !f.p) return;
   const M=skeleton(f,w,h,"rgba(255,210,63,0.95)",4);
   if(opts.view==="behind" && Cam.addrLines) planeLines(Cam.addrLines,M,w,h);
-  if(trail.length>1){ ctx.strokeStyle="rgba(255,255,255,0.8)"; ctx.lineWidth=3; ctx.beginPath(); trail.forEach((q,i)=>{ const P=M(q.p); i?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke(); }
+  if(trail.length>1){ ctx.lineWidth=3.5; ctx.lineCap="round";
+    for(let i=1;i<trail.length;i++){ const A=M(trail[i-1].p), B=M(trail[i].p); ctx.strokeStyle=trail[i].d?"rgba(255,210,63,0.95)":"rgba(120,220,255,0.95)"; ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); } }
 }
 // líneas guía de la vista desde atrás: la columna (cadera-hombros) y el plano (manos-hombros), alargadas
 function planeLines(L,M,w,h){ const ext=(a,b,k)=>[a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k];
@@ -486,21 +527,51 @@ Cam.replay=function(res, speed=0.3, onEnd){
   // el texto no puede ir en espejo: se quita el espejo del lienzo y se espeja el dibujo a mano
   const mir=canvas.classList.contains("mirror"); if(mir) canvas.classList.remove("mirror");
   const restore=()=>{ if(mir) canvas.classList.add("mirror"); };
-  const hands=F.map(f=>mid(f.p.lw,f.p.rw));
+  const hands=F.map(f=>mid(f.p.lw,f.p.rw)), rel=k=>Math.max(0,Math.min(F.length-1,k-(mk.a-8>0?mk.a-8:0)));
   const tick=()=>{ if(!replaying) return; const el=(performance.now()-start)*speed; let i=0; while(i<F.length-1 && F[i+1].t-t0<el) i++;
-    const {w,h,d}=fit(); ctx.setTransform(d,0,0,d,0,0); ctx.fillStyle="rgba(8,24,18,0.92)"; ctx.fillRect(0,0,w,h);
+    const {w,h,d}=fit(); ctx.setTransform(d,0,0,d,0,0);
     const M0=mapper(F[i],w,h), M=mir?(p=>{ const q=M0(p); return [w-q[0],q[1]]; }):M0;
-    ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=2; ctx.beginPath(); hands.forEach((p,j)=>{ const P=M(p); j?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke();
-    ctx.strokeStyle="#ffd23f"; ctx.lineWidth=3.5; ctx.beginPath(); hands.slice(0,i+1).forEach((p,j)=>{ const P=M(p); j?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke();
+    // la foto real del cuadro (si la hay), un poco oscurecida para que se lean las líneas
+    if(F[i].img){ const s=Math.max(w/F[i].w,h/F[i].h), ox=(w-F[i].w*s)/2, oy=(h-F[i].h*s)/2; ctx.save(); if(mir){ ctx.translate(w,0); ctx.scale(-1,1); }
+      ctx.drawImage(F[i].img, ox, oy, F[i].w*s, F[i].h*s); ctx.restore(); ctx.fillStyle="rgba(8,24,18,0.35)"; ctx.fillRect(0,0,w,h); }
+    else { ctx.fillStyle="rgba(8,24,18,0.92)"; ctx.fillRect(0,0,w,h); }
+    const topI=rel(mk.top), impI=rel(mk.imp);
+    ctx.strokeStyle="rgba(255,255,255,0.3)"; ctx.lineWidth=2; ctx.beginPath(); hands.forEach((p,j)=>{ const P=M(p); j?ctx.lineTo(P[0],P[1]):ctx.moveTo(P[0],P[1]); }); ctx.stroke();
+    const path=(j0,j1,col)=>{ if(j1<j0) return; ctx.strokeStyle=col; ctx.lineWidth=3.5; ctx.beginPath(); for(let j=j0;j<=j1;j++){ const P=M(hands[j]); j===j0?ctx.moveTo(P[0],P[1]):ctx.lineTo(P[0],P[1]); } ctx.stroke(); };
+    path(0,Math.min(i,topI),"#78dcff"); if(i>topI) path(topI,i,"#ffd23f");
     skeleton(F[i],w,h,"#ffffff",4,M);
     if(res.posture && res.posture.lines) planeLines(res.posture.lines,M,w,h);
-    const rel=k=>Math.max(0,Math.min(F.length-1,k-(mk.a-8>0?mk.a-8:0)));
+
     for(const [k,lab] of [[mk.top,"arriba"],[mk.imp,"impacto"]]){ const P=M(hands[rel(k)]); ctx.fillStyle="#ffd23f"; ctx.beginPath(); ctx.arc(P[0],P[1],5,0,Math.PI*2); ctx.fill();
       ctx.font="600 12px Figtree, system-ui, sans-serif"; ctx.fillText(lab,P[0]+8,P[1]-6); }
     ctx.fillStyle="#fff"; ctx.font="700 14px Figtree, system-ui, sans-serif"; ctx.fillText(`Cámara lenta ×${speed}`,12,h-14);
+    ctx.font="600 12px Figtree, system-ui, sans-serif"; ctx.textAlign="right"; ctx.fillStyle="#78dcff"; ctx.fillText("━ subida",w-74,h-14); ctx.fillStyle="#ffd23f"; ctx.fillText("━ bajada",w-12,h-14); ctx.textAlign="left";
     if(el>=T+400 || !replaying){ replaying=null; canvas.classList.remove("replay"); restore(); onEnd&&onEnd(); return; } requestAnimationFrame(tick); };
   tick();
 };
+// Cuadros clave del swing (address, arriba, impacto, final) con la foto real, el esqueleto, el camino de las manos y las líneas
+Cam.keyFrames=function(res, cv, mir){
+  const F=res&&res.poseFrames; if(!F||!F.length||!cv) return false; const mk=res.marks, base=mk.a-8>0?mk.a-8:0, rel=k=>Math.max(0,Math.min(F.length-1,k-base));
+  const dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight; if(!W||!H) return false; cv.width=W*dpr; cv.height=H*dpr;
+  const old=ctx; ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  try{
+    const hands=F.map(f=>mid(f.p.lw,f.p.rw)), keys=[["Address",rel(mk.a)],["Arriba",rel(mk.top)],["Impacto",rel(mk.imp)],["Final",rel(mk.fin)]];
+    // recuadro del cuerpo en todo el swing (con margen), para que la figura llene cada cuadro
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const f of F) for(const k in f.p){ const q=f.p[k]; if(!q) continue; x0=Math.min(x0,q[0]); x1=Math.max(x1,q[0]); y0=Math.min(y0,q[1]); y1=Math.max(y1,q[1]); }
+    const pw=(x1-x0)*0.12+10, ph=(y1-y0)*0.08+10; x0-=pw; x1+=pw; y0-=ph; y1+=ph;
+    const gap=6, lab=18, cw=(W-gap*3)/4, ch=H-lab;
+    keys.forEach(([name,i],c)=>{ const cx0=c*(cw+gap), f=F[i], sc=Math.min(cw/(x1-x0), ch/(y1-y0)), offx=(cw-(x1-x0)*sc)/2, offy=(ch-(y1-y0)*sc)/2;
+      const X=p=>{ const x=offx+(p[0]-x0)*sc; return mir? cx0+cw-x : cx0+x; }, M=p=>[X(p), offy+(p[1]-y0)*sc];
+      ctx.save(); ctx.beginPath(); ctx.rect(cx0,0,cw,ch); ctx.clip(); ctx.fillStyle="#0f2a20"; ctx.fillRect(cx0,0,cw,ch);
+      if(f.img){ ctx.save(); if(mir){ ctx.translate(cx0+cw,0); ctx.scale(-1,1); } else ctx.translate(cx0,0);
+        ctx.drawImage(f.img, offx-x0*sc, offy-y0*sc, f.w*sc, f.h*sc); ctx.restore(); ctx.fillStyle="rgba(8,24,18,0.3)"; ctx.fillRect(cx0,0,cw,ch); }
+      if(res.posture && res.posture.lines) planeLines(res.posture.lines,M,cw,ch);
+      const tI=rel(mk.top), seg=(j0,j1,col)=>{ if(j1<=j0) return; ctx.strokeStyle=col; ctx.lineWidth=2.5; ctx.beginPath(); for(let j=j0;j<=j1;j++){ const P=M(hands[j]); j===j0?ctx.moveTo(P[0],P[1]):ctx.lineTo(P[0],P[1]); } ctx.stroke(); };
+      seg(rel(mk.a),Math.min(i,tI),"#78dcff"); if(i>tI) seg(tI,i,"#ffd23f");
+      skeleton(f,cw,ch,"#ffffff",2.5,M); ctx.restore();
+      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--ink")||"#222"; ctx.font="600 12px Figtree, system-ui, sans-serif"; ctx.textAlign="center"; ctx.fillText(name, cx0+cw/2, H-4); });
+  } finally { ctx=old; }
+  return true; };
 Cam.stopReplay=()=>{ replaying=null; if(canvas) canvas.classList.remove("replay"); };
 Cam.replaying=()=>!!replaying;
 })();
