@@ -13,9 +13,12 @@ SL.CLUBS = {
   iron7: {name:"Hierro 7", short:"7",  radius:1.35, smash:1.33, launch:17,   spin:7000,  vref:40, def:35},
   iron9: {name:"Hierro 9", short:"9",  radius:1.31, smash:1.29, launch:21,   spin:8300,  vref:38, def:33},
   wedge: {name:"PW",       short:"PW", radius:1.28, smash:1.24, launch:24,   spin:9300,  vref:37, def:32},
-  sw:    {name:"SW",       short:"SW", radius:1.25, smash:1.17, launch:30,   spin:10000, vref:35, def:30}
+  gw:    {name:"GW",       short:"GW", radius:1.265,smash:1.21, launch:27,   spin:9700,  vref:36, def:31},
+  sw:    {name:"SW",       short:"SW", radius:1.25, smash:1.17, launch:30,   spin:10000, vref:35, def:30},
+  lw:    {name:"LW",       short:"LW", radius:1.24, smash:1.12, launch:33.5, spin:10300, vref:34, def:29}
 };
-SL.CLUB_ORDER = ["sw","wedge","iron9","iron7","iron5","hybrid","wood3","driver"];
+SL.CLUB_ORDER = ["lw","sw","gw","wedge","iron9","iron7","iron5","hybrid","wood3","driver"];
+SL.WEDGES = ["wedge","gw","sw","lw"];
 
 // ---------- vectores y cuaterniones ----------
 const norm = v => Math.hypot(v[0],v[1],v[2]);

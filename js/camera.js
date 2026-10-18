@@ -62,8 +62,8 @@ function peakOf(fn){ const v=[]; for(let k=0;k<=14;k++){ const x=fn(k); v.push(x
 // Mide la velocidad máxima de las manos en la bajada (como los sensores de mano tipo Enso de PING) y la pasa a velocidad del palo
 // según el largo de TU brazo y el largo de ESE palo. También estima el punto bajo del arco y el ángulo de ataque.
 // Largos típicos de palo (m) y posición típica de la bola delante del esternón (m)
-SL.CLUB_LEN={driver:1.16, wood3:1.09, hybrid:1.02, iron5:0.965, iron7:0.94, iron9:0.915, wedge:0.90, sw:0.89};
-SL.BALL_POS={driver:0.10, wood3:0.08, hybrid:0.06, iron5:0.05, iron7:0.03, iron9:0.02, wedge:0.01, sw:0.0};
+SL.CLUB_LEN={driver:1.16, wood3:1.09, hybrid:1.02, iron5:0.965, iron7:0.94, iron9:0.915, wedge:0.90, gw:0.895, sw:0.89, lw:0.885};
+SL.BALL_POS={driver:0.10, wood3:0.08, hybrid:0.06, iron5:0.05, iron7:0.03, iron9:0.02, wedge:0.01, gw:0.005, sw:0.0, lw:0.0};
 const HAND_K=1.672;   // con brazo de 0,62 m y driver: palo ≈ 4,8 × manos (golfista promedio: manos 20 mph → palo ~98 mph)
 SL.camRatio=(club, arm=0.62, grip="club")=>{ const L=SL.CLUB_LEN[club]||1; return HAND_K*(arm+L)/arm*(grip==="club"?1:0.92); };
 SL.analyzePose=function(F, clubKey, opts={}){

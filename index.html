@@ -107,6 +107,30 @@ h1 span{color:var(--accent)}
 .clubs::-webkit-scrollbar{display:none}
 .clubs .chip{flex:0 0 auto;min-width:76px;scroll-snap-align:center}
 #swingViz{height:190px}
+.drillTip{pointer-events:auto;padding:7px 34px 7px 10px;font-size:.8rem}
+.drillTip b{font-size:.9rem}
+.drillTip .x{position:absolute;right:6px;top:6px;border:0;background:transparent;color:#fff;font-size:1rem;padding:4px 8px;cursor:pointer}
+.drillTip .dots{display:inline-flex;gap:4px;vertical-align:-1px;margin-right:4px}
+.drillTip .dots i{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--accent)}
+.drillTip .dots i.on{background:var(--accent)}
+.drillTip .last{margin-top:3px;color:#dfe9e2}
+table.wedgeTbl{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed}
+table.wedgeTbl th{font:600 .74rem var(--body);color:var(--muted);text-transform:none;letter-spacing:0;text-align:center;padding:2px}
+table.wedgeTbl thead th span{display:block;margin-top:2px}
+table.wedgeTbl tbody th{text-align:left;color:var(--ink);font-size:.9rem;width:52px}
+table.wedgeTbl tbody th small{display:block;color:var(--muted);font-weight:400;font-size:.72rem}
+table.wedgeTbl td{padding:0;border:0}
+.wcell{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 2px;cursor:pointer;color:var(--ink);display:flex;flex-direction:column;align-items:center;gap:1px}
+.wcell b{font:700 1.25rem var(--display)}
+.wcell small{font-size:.66rem;color:var(--muted);white-space:nowrap}
+.wcell.est{border-style:dashed;background:transparent}
+.wcell.est b{color:var(--muted);font-weight:500}
+.wcell.on{outline:2px solid var(--accent)}
+.legend b.mut{color:var(--muted);font-weight:500}
+svg.clk{width:24px;height:24px}
+svg.clk circle{fill:none;stroke:var(--muted);stroke-width:1.3}
+svg.clk circle.c{fill:var(--ink);stroke:none}
+svg.clk line{stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
 #keyFrames{height:190px;background:transparent;border:0;margin-bottom:8px}
 /* cámara: pequeña sobre el campo (para ver el campo y apuntar) o en grande */
 .view.pipOn .holeTip{left:calc(min(30%,138px) + 20px);top:118px}
@@ -275,6 +299,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     </div>
     <div class="hudMsg" id="hudMsg" hidden></div>
     <div class="holeTip" id="holeTip" hidden></div>
+    <div class="holeTip drillTip" id="drillTip" hidden aria-live="polite"></div>
     <div class="celebrate" id="celebrate" hidden aria-live="polite"></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
@@ -390,6 +415,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button class="tab" role="tab" data-tab="field" aria-selected="true">Dispersión</button>
       <button class="tab" role="tab" data-tab="curve" aria-selected="false">Curva</button>
       <button class="tab" role="tab" data-tab="session" aria-selected="false">Sesión</button>
+      <button class="tab" role="tab" data-tab="wedges" aria-selected="false">Wedges</button>
     </div>
     <div class="panel" data-panel="field">
       <canvas class="plot" id="range" aria-label="Vista desde arriba con la caída de tus tiros"></canvas>
@@ -403,6 +429,14 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <canvas class="plot" id="plot" aria-label="Curva de giro del último swing"></canvas>
       <div class="legend"><span><i style="background:var(--muted)"></i>Subida</span><span><i style="background:var(--accent)"></i>Bajada</span><span>▲ inicio · ● arriba · ★ impacto</span></div>
       <p class="note" id="quality"></p>
+    </div>
+    <div class="panel" data-panel="wedges" hidden>
+      <p class="note">Tu <b>matriz de wedges</b> (el sistema del reloj de Dave Pelz): cada wedge con cuatro largos de swing, tomando tu brazo izquierdo como la aguja de un reloj. Así sabes exactamente cuánto vuela cada uno y dejas de adivinar dentro de 100 metros. Toca una casilla para practicarla en el range: 5 swings por casilla.</p>
+      <div class="tablebox"><table class="wedgeTbl" id="wedgeTbl"></table></div>
+      <p class="note" id="wedgeNote"></p>
+      <div class="legend"><span><b>62</b> carry medido</span><span><b class="mut">≈55</b> estimado con tu velocidad</span><span>±: qué tanto varía</span></div>
+      <div class="row"><button class="ghost primary" id="wedgeAuto">Completar mi matriz</button></div>
+      <p class="note">En el campo, cuando el objetivo está a tiro de wedge, el caddie te dice cuál usar y a qué hora del reloj (🕘). La cámara mide el ángulo del brazo; con el sensor se mide el del palo, que suma el quiebre de muñecas.</p>
     </div>
     <div class="panel" data-panel="session" hidden>
       <div class="kpis">
@@ -469,6 +503,8 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <select id="alt"><option value="0">Nivel del mar</option><option value="1000">Cali (~1.000 m)</option><option value="1500">Medellín (~1.500 m)</option><option value="2600">Bogotá (2.600 m)</option></select>
       <label for="hand">Juego</label>
       <select id="hand"><option value="R">Diestro</option><option value="L">Zurdo</option></select>
+      <label for="bag">Wedges en tu bolsa</label>
+      <select id="bag"><option value="4">PW, GW 52°, SW 56° y LW 60°</option><option value="3">PW, GW 52° y SW 56°</option><option value="2">PW y SW 56°</option></select>
       <label for="hold">Cómo sostienes el teléfono</label>
       <select id="hold"><option value="phone">Como si fuera el palo</option><option value="club">Sujeto a un palo real</option></select>
       <label for="invert">La bola se va al lado contrario del que debería</label><input type="checkbox" id="invert">
@@ -562,13 +598,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.14"></script>
-<script src="js/courses.js?v=0.14"></script>
-<script src="js/world3d.js?v=0.14"></script>
-<script src="js/sound.js?v=0.14"></script>
-<script src="js/camera.js?v=0.14"></script>
-<script src="js/online-config.js?v=0.14"></script>
-<script src="js/online.js?v=0.14"></script>
-<script src="js/app.js?v=0.14"></script>
+<script src="js/engine.js?v=0.15"></script>
+<script src="js/courses.js?v=0.15"></script>
+<script src="js/world3d.js?v=0.15"></script>
+<script src="js/sound.js?v=0.15"></script>
+<script src="js/camera.js?v=0.15"></script>
+<script src="js/online-config.js?v=0.15"></script>
+<script src="js/online.js?v=0.15"></script>
+<script src="js/app.js?v=0.15"></script>
 </body>
 </html>

@@ -2,11 +2,11 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.14";
+const VERSION="0.15";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
@@ -35,7 +35,19 @@ let shown=null, lastReal=null, suggested=null, has3D=false;
 const saveSettings=()=>store.set("sl2_settings",S);
 // salida según el palo, el swing medido y el tipo de golpe elegido (draw, fade, alto, bajo, flop)
 const launch=(c,ms,h,lie)=>{ const o=SL.launchFor(c,ms,h,lie,S.hand), t=h&&h.shot; return t&&t!=="normal" ? SL.applyShot(o,t,S.hand) : o; };
-const shotFor=c=>SL.SHOTS[S.shot] && (!SL.SHOTS[S.shot].wedges || c==="wedge"||c==="sw"||c==="iron9") ? S.shot : "normal";
+// ===== Wedges y bolsa =====
+const isWedge=c=>SL.WEDGES.includes(c);
+const inBag=c=>c==="gw"?S.bag!=="2":c==="lw"?S.bag==="4":true;
+const bagWedges=()=>SL.WEDGES.filter(inBag);
+// Sistema del reloj (Dave Pelz): el brazo izquierdo como aguja de un reloj; para zurdos el reloj se espeja
+const CLOCK=[{k:"730",arm:45,sp:0.52},{k:"900",arm:90,sp:0.71},{k:"1030",arm:135,sp:0.86},{k:"full",arm:165,sp:1}];
+const clockName=k=>k==="full"?"completo":(S.hand==="L"?{730:"4:30",900:"3:00",1030:"1:30"}:{730:"7:30",900:"9:00",1030:"10:30"})[k];
+const clockAt=k=>k==="full"?"con swing completo":`a las ${clockName(k)}`;
+// la cámara mide el ángulo del brazo; el sensor, el del palo (que suma el quiebre de muñecas)
+function clockOf(h){ if(!h || h.arcTop==null) return null; const a=h.arcTop;
+  if(h.source==="camera") return a<67?"730":a<112?"900":a<146?"1030":"full";
+  return a<100?"730":a<160?"900":a<205?"1030":"full"; }
+const shotFor=c=>SL.SHOTS[S.shot] && (!SL.SHOTS[S.shot].wedges || isWedge(c)||c==="iron9") ? S.shot : "normal";
 // altura: en el range, donde juegas normalmente; en un campo, la del campo
 const curAlt=()=>mode==="course" ? (CUR.alt||0) : (+S.alt||0);
 function applyAlt(){ SL.setAlt(curAlt()); }
@@ -142,6 +154,7 @@ function yardage(){
     const ico={water:"🌊 Agua",bunker:"⛱ Bunker",green:"⛳ Green",ob:"🚫 Fuera"};
     for(const [k,a,b] of seen.slice(0,3)) parts.push(`${ico[k]} ${Math.round(S.dist==="yd"?a/0.9144:a)}–${Math.round(S.dist==="yd"?b/0.9144:b)}`);
     if(caddieInfo && Math.abs(caddieInfo.wind)>=3) parts.push(`💨 juega como ${fmtDist(caddieInfo.plays)}`); }
+  if((mode==="course"||mode==="range") && caddieInfo && caddieInfo.clock){ const k=caddieInfo.clock; parts.push(`🕘 ${CLUBS[k.c].name} ${clockAt(k.k)} ≈ ${fmtDist(k.cell.total)}${k.cell.est?" (estimado)":""}`); }
   return parts.join(" · "); }
 function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="";
   if(mode==="course"&&course){ const h=HOLES[course.hole], q=aimPoint(); side=Math.hypot(q.x-h.pinX,q.z-h.L)<1?" · al hoyo":course.aim?"":" · ruta"; }
@@ -186,7 +199,7 @@ function newRound(){ course={courseId, sel:selOf(courseId), hole:0, ball:{x:0,z:
   saveCourse(); setupHole(true); renderScore(); renderCourses(); }
 const distToPin=()=>{ const h=HOLES[course.hole]; return Math.hypot(h.pinX-course.ball.x, h.L-course.ball.z); };
 let builtHole="";
-const allowedClubs=lie=>SL.CLUB_ORDER.filter(c=>c==="driver"?lie==="tee":c==="wood3"?(lie==="tee"||lie==="fairway"):(lie==="bunker"?["sw","wedge","iron9"].includes(c):true));
+const allowedClubs=lie=>SL.CLUB_ORDER.filter(c=>inBag(c) && (c==="driver"?lie==="tee":c==="wood3"?(lie==="tee"||lie==="fairway"):(lie==="bunker"?(isWedge(c)||c==="iron9"):true)));
 // Objetivo automático: sigue la ruta del hoyo (zonas de aterrizaje reales) si el green no está a tu alcance
 function routeAim(){
   const h=HOLES[course.hole], b=course.ball, pin={x:h.pinX,z:h.L}, D=(p,q)=>Math.hypot(p.x-q.x,p.z-q.z), dp=D(b,pin);
@@ -223,7 +236,8 @@ function setupHole(announce){
 // ===== Caddie =====
 // Velocidad típica de TU palo: mediana de tus últimos golpes reales con él (ya calibrada). Si no hay, se escala
 // la típica del palo con tu velocidad en los palos que sí has medido.
-function clubSpeed(c){ const real=history.filter(h=>!h.sim);
+// los medios swings (7:30 y 9:00) no cuentan: no son tu velocidad normal con ese palo
+function clubSpeed(c){ const real=history.filter(h=>!h.sim && !["730","900"].includes(clockOf(h)));
   const mine=real.filter(h=>h.club===c).slice(0,12).map(h=>h.msRaw*factor(c,srcOf(h)));
   if(mine.length>=2) return median(mine);
   const idx=Object.keys(CLUBS).map(k=>{ const v=real.filter(h=>h.club===k).slice(0,12).map(h=>h.msRaw*factor(k,srcOf(h))); return v.length>=2?median(v)/CLUBS[k].def:null; }).filter(Boolean);
@@ -255,9 +269,75 @@ function caddie(){
   return {club:best.c, total:Math.hypot(best.mid.q[0]-o.x,best.mid.q[1]-o.z), lie:best.mid.lie, plays:R-wind, wind, R};
 }
 function suggestClub(){
-  if(mode==="range"){ const R=Math.hypot(rangeAim.x,rangeAim.z); let b=null; for(const c of SL.CLUB_ORDER){ const t=expectedTotal(c,"tee"), k=t<R?(R-t)*1.3:t-R; if(!b||k<b.k) b={c,k}; } suggested=b.c; caddieInfo=null; renderChips(); renderAim(); return; }
+  if(mode==="range"){ const R=Math.hypot(rangeAim.x,rangeAim.z); let b=null; for(const c of SL.CLUB_ORDER.filter(inBag)){ const t=expectedTotal(c,"tee"), k=t<R?(R-t)*1.3:t-R; if(!b||k<b.k) b={c,k}; }
+    caddieInfo=null; const pk=R<=maxWedge()*1.04 ? clockPick(R) : null; if(pk) caddieInfo={clock:pk}; suggested=pk?pk.c:b.c; renderChips(); renderAim(); return; }
   if(mode!=="course" || !course || course.holed){ suggested=null; caddieInfo=null; renderChips(); return; }
-  caddieInfo=caddie(); suggested=caddieInfo?caddieInfo.club:club; if(suggested!==club) setClub(suggested,true); renderChips(); renderAim();
+  caddieInfo=caddie(); suggested=caddieInfo?caddieInfo.club:club;
+  // dentro del alcance de los wedges: qué wedge y a qué hora del reloj, según tu matriz
+  if(caddieInfo && course.lie!=="green" && caddieInfo.plays<=maxWedge()*1.04){ const pk=clockPick(caddieInfo.plays); if(pk){ caddieInfo.clock=pk; suggested=pk.c; } }
+  if(suggested!==club) setClub(suggested,true); renderChips(); renderAim();
+}
+// ===== Matriz de wedges =====
+// Cada casilla: mediana de carry y total de tus últimos swings reales con ese wedge y ese largo de swing.
+// Sin datos, se estima con tu velocidad de ese palo y la fracción típica de cada largo (estimado).
+let wmCache=null, wmKey="";
+function wedgeMatrix(){ const key=history.length+"|"+(history[0]&&history[0].id)+"|"+S.bag+"|"+SL.env.alt+"|"+S.hand+"|"+JSON.stringify(calib).length;
+  if(wmCache && wmKey===key) return wmCache;
+  const real=history.filter(h=>!h.sim && isWedge(h.club) && h.arcTop!=null), M={};
+  for(const c of bagWedges()){ M[c]={}; for(const p of CLOCK){ const d=real.filter(h=>h.club===c && clockOf(h)===p.k).slice(0,12).map(derive);
+      if(d.length){ const ca=d.map(x=>x.carry), m=median(ca), sd=Math.sqrt(ca.reduce((a,x)=>a+(x-m)**2,0)/ca.length); M[c][p.k]={n:d.length, carry:m, total:median(d.map(x=>x.total)), sd}; }
+      else { const s=SL.simulateLocal(launch(c,clubSpeed(c)*p.sp,{},"tee"),[0,0],null); M[c][p.k]={n:0, carry:s.carry, total:Math.hypot(s.x,s.z), est:true}; } } }
+  wmCache=M; wmKey=key; return M; }
+function maxWedge(){ const M=wedgeMatrix(); return Math.max(0,...bagWedges().map(c=>M[c].full.total)); }
+// el wedge y la hora del reloj que mejor dejan la bola a esa distancia (prefiere casillas medidas)
+function clockPick(d){ const M=wedgeMatrix(); let b=null;
+  for(const c of bagWedges()) for(const p of CLOCK){ const cell=M[c][p.k], e=Math.abs(cell.total-d)+(cell.est?4:0)+(p.k==="730"?1:0); if(!b||e<b.e) b={c,k:p.k,cell,e}; }
+  return b && Math.abs(b.cell.total-d)<14 ? b : null; }
+// ---- entrenamiento guiado de la matriz en el range ----
+let drill=null;
+function nextDrillCell(){ const M=wedgeMatrix(); let b=null; for(const c of bagWedges()) for(const p of CLOCK){ const n=M[c][p.k].n; if(n<5 && (!b||n<b.n)) b={c,k:p.k,n}; } return b; }
+function startDrill(c,k,auto){
+  if(!c){ const nx=nextDrillCell(); if(!nx){ msg("Tu matriz ya está completa: cada casilla tiene 5 swings o más.",false); return; } c=nx.c; k=nx.k; }
+  drill={c,k,goal:5,hits:[],auto:!!auto,last:""}; if(mode!=="range") setMode("range"); setClub(c);
+  const cell=wedgeMatrix()[c][k]; if(has3D) setAim({x:0,z:Math.max(15,Math.round(cell.total))},true);
+  renderDrill(); window.scrollTo({top:0,behavior:"smooth"});
+  say(`Matriz de wedges: ${CLUBS[c].name} ${clockAt(k)}. Haz cinco swings.`); }
+function stopDrill(){ drill=null; renderDrill(); }
+function renderDrill(){ const el=$("drillTip"); if(!el) return; if(!drill || mode!=="range"){ el.hidden=true; return; }
+  const n=drill.hits.length, avg=n?median(drill.hits):null;
+  el.innerHTML=`<button class="x" id="drillX" aria-label="Terminar entrenamiento">✕</button><b>Matriz · ${CLUBS[drill.c].name} · ${drill.k==="full"?"completo":clockName(drill.k)}</b>`+
+    `<span class="dots">${Array.from({length:drill.goal},(_,i)=>`<i class="${i<n?"on":""}"></i>`).join("")}</span> ${n}/${drill.goal}`+(avg!=null?` · ${fmtDist(avg)}`:"")+
+    (drill.last?`<div class="last">${drill.last}</div>`:`<div class="last">${clockHelp(drill.k)}</div>`);
+  el.hidden=false; $("drillX").onclick=e=>{ e.stopPropagation(); stopDrill(); }; }
+function clockHelp(k){ return k==="730"?"Brazo izquierdo a la altura de la cadera: un swing corto y suave."
+  : k==="900"?"Brazo izquierdo paralelo al suelo, con las muñecas quebradas (el palo apunta al cielo)."
+  : k==="1030"?"Manos a la altura del hombro o un poco más: tres cuartos de swing."
+  : "Swing completo, con el mismo ritmo de siempre."; }
+const CLK_ORD={730:0,900:1,1030:2,full:3};
+function drillShot(h){ if(!drill || h.sim || mode!=="range") return;
+  if(h.club!==drill.c){ drill.last=`Ese swing fue con ${CLUBS[h.club].name}: para la matriz usa el ${CLUBS[drill.c].name}.`; renderDrill(); return; }
+  const k=clockOf(h), dv=derive(h);
+  if(!k){ drill.last="No pude ver el largo de ese swing: quédate quieto antes de empezar."; renderDrill(); return; }
+  if(k===drill.k){ drill.hits.push(dv.carry); const n=drill.hits.length;
+    drill.last=`✓ ${clockName(k)} (${h.arcTop}°) · carry ${fmtDist(dv.carry)}`;
+    if(n>=drill.goal){ const m=median(drill.hits), sd=Math.sqrt(drill.hits.reduce((a,x)=>a+(x-m)**2,0)/n);
+      drill.last=`Casilla lista: ${CLUBS[drill.c].name} ${clockAt(drill.k)} = ${fmtDist(m)} de carry (±${fmtDist(sd)}).`; say(`Listo. ${CLUBS[drill.c].name} ${clockAt(drill.k)}: ${sayDist(m)}.`);
+      if(drill.auto){ const nx=nextDrillCell(); renderDrill(); setTimeout(()=>{ if(drill && nx) startDrill(nx.c,nx.k,true); else stopDrill(); },3500); return; }
+      renderDrill(); setTimeout(()=>{ if(drill && drill.hits.length>=drill.goal) stopDrill(); },6000); return; } }
+  else drill.last=`Ese fue ${clockAt(k)} (${h.arcTop}°): ${CLK_ORD[k]<CLK_ORD[drill.k]?"sube un poco más las manos":"un poco más corto"}. No cuenta para esta casilla, pero sí para tu matriz.`;
+  renderDrill(); }
+// ---- pestaña Wedges en Datos ----
+function clockSvg(k){ const h={730:7.5,900:9,1030:10.5,full:11.6}[k], a=(S.hand==="L"?12-h:h)/12*Math.PI*2, x=13+9*Math.sin(a), y=13-9*Math.cos(a);
+  return `<svg class="clk" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5"/><line x1="13" y1="13" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/><circle class="c" cx="13" cy="13" r="1.8"/></svg>`; }
+function renderWedges(){ const t=$("wedgeTbl"); if(!t || t.closest("[hidden]")) return; const M=wedgeMatrix(), u=S.dist==="yd"?"yd":"m", cv=v=>Math.round(S.dist==="yd"?v/0.9144:v);
+  t.innerHTML=`<thead><tr><th>Carry (${u})</th>${CLOCK.map(p=>`<th>${clockSvg(p.k)}<span>${p.k==="full"?"Completo":clockName(p.k)}</span></th>`).join("")}</tr></thead><tbody>`+
+    bagWedges().map(c=>`<tr><th>${CLUBS[c].name}<small>${{wedge:"46°",gw:"52°",sw:"56°",lw:"60°"}[c]}</small></th>`+CLOCK.map(p=>{ const e=M[c][p.k];
+      return `<td><button class="wcell${e.est?" est":""}${drill&&drill.c===c&&drill.k===p.k?" on":""}" data-c="${c}" data-k="${p.k}" aria-label="${CLUBS[c].name} ${clockAt(p.k)}: ${e.est?"estimado ":""}${cv(e.carry)} ${u}">`+
+        `<b>${e.est?"≈":""}${cv(e.carry)}</b><small>${e.est?"estimado":`${e.n} swing${e.n>1?"s":""}`+(e.n>=3?` · ±${cv(e.sd)}`:"")}</small></button></td>`; }).join("")+`</tr>`).join("")+`</tbody>`;
+  t.querySelectorAll(".wcell").forEach(b=>b.addEventListener("click",()=>startDrill(b.dataset.c,b.dataset.k,false)));
+  const M2=M, gaps=[]; const ws=bagWedges(); for(let i=0;i<ws.length-1;i++){ const A=M2[ws[i]].full, B=M2[ws[i+1]].full, g=A.carry-B.carry; if(A.n && B.n && g>16) gaps.push(`entre ${CLUBS[ws[i]].name} y ${CLUBS[ws[i+1]].name} hay ${fmtDist(g)}`); }
+  const filled=bagWedges().reduce((a,c)=>a+CLOCK.filter(p=>M[c][p.k].n>=3).length,0), total=bagWedges().length*CLOCK.length;
+  $("wedgeNote").textContent=`${filled} de ${total} casillas con 3 swings o más.`+(gaps.length?` Ojo: ${gaps.join("; ")} con swing completo; un wedge intermedio o un swing a las 10:30 cubre ese hueco.`:"");
 }
 function puttsFor(d){ const r=Math.random(); if(d<1.5) return 1; if(d<3) return r<0.6?1:2; if(d<8) return r<0.15?1:(r<0.93?2:3); if(d<15) return r<0.05?1:(r<0.8?2:3); return r<0.6?2:3; }
 const RESULT={"-3":"¡Albatros!","-2":"¡Eagle!","-1":"Birdie","0":"Par","1":"Bogey","2":"Doble bogey"};
@@ -545,7 +625,7 @@ function postureTips(po){ const t=[];
 const sgn=a=>(a>0?"+":"")+a.toFixed(0)+"°";
 function aoaTip(h){ if(!h.aoaOk) return null; const c=h.club, a=h.aoa, low=h.lowCm;
   const lowTxt=low==null?"":Math.abs(low)<2?" Tu punto bajo quedó justo debajo del centro de tu postura.":` Tu punto bajo quedó ${Math.abs(low)} cm ${low>0?"delante":"detrás"} del centro de tu postura.`;
-  const ideal={driver:[1,6], wood3:[-2,2], hybrid:[-3,1], iron5:[-5,-1], iron7:[-6,-2], iron9:[-7,-2], wedge:[-8,-3], sw:[-9,-3]}[c]||[-5,0];
+  const ideal={driver:[1,6], wood3:[-2,2], hybrid:[-3,1], iron5:[-5,-1], iron7:[-6,-2], iron9:[-7,-2], wedge:[-8,-3], gw:[-8,-3], sw:[-9,-3], lw:[-9,-3]}[c]||[-5,0];
   const name=CLUBS[c].name;
   if(a>=ideal[0] && a<=ideal[1]) return `<em>Ataque ${sgn(a)}</em>: justo lo que pide el ${name}.`+lowTxt;
   if(c==="driver") return `<em>Ataque ${sgn(a)}</em>: con el driver conviene pegar subiendo (+2° a +5°). Pon la bola frente al talón del pie delantero y deja el punto bajo detrás de ella.`+lowTxt;
@@ -557,13 +637,15 @@ function verdictFor(h){
   else if(h.ratio>=2.6 && h.ratio<=3.4) p.push("<em>Tempo de libro.</em> Cerca del 3:1 de los profesionales.");
   else if(h.ratio<2.6) p.push("<em>Subida apurada.</em> Lleva el palo arriba más lento y deja que la bajada acelere.");
   else p.push("<em>Subida muy lenta</em> o pausa arriba. Busca un ritmo continuo.");
-  if(h.arcTop!=null){ p.push(h.len==="completo"?`Swing completo: ${h.arcTop}° de subida y ${h.arcFin}° de final.`:h.len==="tres cuartos"?`Tres cuartos de swing (${h.arcTop}° de subida).`:`Medio swing (${h.arcTop}° de subida): para pegar más lejos, sube más el palo.`);
+  if(h.arcTop!=null){ p.push(h.len==="completo"?`Swing completo: ${h.arcTop}° de subida y ${h.arcFin}° de final.`:h.len==="tres cuartos"?`Tres cuartos de swing (${h.arcTop}° de subida).`:(isWedge(h.club)?`Medio swing (${h.arcTop}° de subida).`:`Medio swing (${h.arcTop}° de subida): para pegar más lejos, sube más el palo.`));
     if(h.arcFin!=null && h.arcFin<h.arcTop*0.6) p.push("Frenaste el final: termina el swing con las manos arriba."); }
+  if(isWedge(h.club) && clockOf(h) && !h.example){ const k=clockOf(h), cell=wedgeMatrix()[h.club]&&wedgeMatrix()[h.club][k];
+    if(cell) p.push(`<em>Swing ${clockAt(k)}</em> con el ${CLUBS[h.club].name}: en tu matriz vuela ${fmtDist(cell.carry)} de carry${cell.n?` (${cell.n} swing${cell.n>1?"s":""})`:" (estimado)"}.`); }
   const sh=shapeName(h); if(sh) p.push(h.faceOk?`<em>${sh}.</em> Cara ${fmtFace(h).toLowerCase()}`+(h.pathOk?`, ruta ${fmtPath(h).toLowerCase()}.`:"."):`<em>${sh}.</em>`);
   if(h.sat) p.push(h.method==="fit"?"El sensor topó y reconstruí el pico.":"El sensor topó: tu velocidad real es mayor que esta.");
   if(h.source==="camera"){ const at=aoaTip(h); if(at) p.push(at);
     if(h.hand){ const hs=fmtSpeed(h.hand); p.push(`Tus manos llegaron a ${hs.v} ${hs.u} en la bajada (un golfista promedio anda por ${fmtSpeed(8.9).v} y los más rápidos del tour pasan de ${fmtSpeed(12.8).v}).`);
-      if(h.view==="front" && h.handDrop!=null && h.handPeakMs!=null && h.handPeakMs>-35 && h.handPeakMs<230){
+      if(h.view==="front" && !["730","900"].includes(clockOf(h)) && h.handDrop!=null && h.handPeakMs!=null && h.handPeakMs>-35 && h.handPeakMs<230){
         if(h.handDrop<0.06) p.push("Tus manos casi no frenaron antes del impacto: en un swing eficiente las manos frenan justo antes de la bola para que la cabeza del palo las adelante.");
         else p.push(`Tus manos llegaron a su máximo ${Math.max(0,h.handPeakMs)} ms antes del impacto y frenaron un ${Math.round(h.handDrop*100)}% al llegar a la bola: ese freno es el que suelta el palo (en los jugadores hábiles el máximo llega unos 50 ms antes).`); } }
     if(h.impSrc==="sonido") p.push("El impacto lo marcó el sonido del golpe (más exacto que la imagen).");
@@ -765,21 +847,21 @@ function renderCalib(){
 // Tipos de golpe
 function buildShots(){ const row=$("shotRow"); row.innerHTML=Object.entries(SL.SHOTS).map(([k,v])=>`<button class="chip sm" data-shot="${k}" aria-pressed="false">${v.name}</button>`).join("");
   row.querySelectorAll(".chip").forEach(b=>b.addEventListener("click",()=>{ S.shot=b.dataset.shot; saveSettings(); renderShots(); suggestClub(); renderAim(); })); }
-function renderShots(){ const eff=shotFor(club); document.querySelectorAll("#shotRow .chip").forEach(b=>{ const k=b.dataset.shot, w=SL.SHOTS[k].wedges && !(club==="wedge"||club==="sw"||club==="iron9");
+function renderShots(){ const eff=shotFor(club); document.querySelectorAll("#shotRow .chip").forEach(b=>{ const k=b.dataset.shot, w=SL.SHOTS[k].wedges && !(isWedge(club)||club==="iron9");
   b.disabled=w; b.setAttribute("aria-pressed",String(k===eff)); b.title=w?"Solo con hierro 9, PW o SW":""; }); $("shotRow").hidden=mode==="data"||mode==="rank"; }
 // Calibración rápida: tu distancia típica con el driver y dónde juegas (altura)
 function renderQuick(){ const card=$("quickCal"); if(!card) return; const need=!clubFactor("driver",S.input) && !S.qcDone && mode!=="rank";
   card.hidden=!need; $("qcUnit").textContent=S.dist==="yd"?"yd":"m"; $("qcAlt").value=String(S.alt||0);
   if(myCarry.driver){ $("qcDist").value=S.dist==="yd"?Math.round(myCarry.driver/0.9144):Math.round(myCarry.driver); $("qcKind").value=myKind.driver||"carry"; }
   const n=realOf("driver",S.input).length; $("qcState").textContent=myCarry.driver?(n<3?`Guardado. Haz ${3-n} swing${3-n>1?"s":""} real${3-n>1?"es":""} con el driver usando ${S.input==="camera"?"la cámara":"el sensor"} para ajustar.`:""):""; }
-function buildChips(){ const row=$("clubRow"); row.innerHTML=Object.keys(CLUBS).map(k=>`<button class="chip" data-club="${k}" aria-pressed="false">${CLUBS[k].name}</button>`).join("");
+function buildChips(){ const row=$("clubRow"); row.innerHTML=Object.keys(CLUBS).filter(inBag).map(k=>`<button class="chip" data-club="${k}" aria-pressed="false">${CLUBS[k].name}</button>`).join("");
   row.querySelectorAll(".chip").forEach(b=>b.addEventListener("click",()=>{ setClub(b.dataset.club); renderHud(); })); }
 function renderChips(){ renderShots(); renderQuick(); document.querySelectorAll("#clubRow .chip").forEach(x=>{ x.setAttribute("aria-pressed",String(x.dataset.club===club));
   const old=x.querySelector(".sug"); if(old) old.remove();
   if((mode==="course"||mode==="range") && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } });
   const cur=document.querySelector('.chip[aria-pressed="true"]'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"}); }catch(_){} 
   document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
-function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
+function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderWedges(); renderDrill(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
 
 // ================= Resultado de un swing =================
 function handleResult(res){
@@ -791,7 +873,7 @@ function handleResult(res){
   if(!h.sim && h.club==="driver") addEntry("speeds",{v:+derive(h).ms.toFixed(2), src:srcOf(h)});
   if(!h.sim){ history.unshift(h); history=history.slice(0,300); store.set("sl2_hist",history);
     traces.unshift({id:h.id, club:h.club, hz:h.hz, s:rawSamples}); traces=traces.slice(0,25); store.set("sl2_traces",traces); lastReal=h; }
-  shown=h; renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawCharts(); renderCalib(); updateLive();
+  shown=h; drillShot(h); renderBoard(h,true); setVerdict(verdictFor(h)); renderHist(); drawCharts(); renderWedges(); renderCalib(); updateLive();
   if(navigator.vibrate) try{ navigator.vibrate(60); }catch(_){}
   const dv=derive(h), s=fmtSpeed(dv.ms);
   const sh=shapeName(h);
@@ -974,7 +1056,7 @@ function testShot(){
   } else ms=c.def*(0.92+Math.random()*0.16);
   const full=c.def*0.85, frac=Math.min(1,ms/full);
   if(S.input==="camera"){ const hand=ms/factor(club,"camera")/SL.camRatio(club,0.62,S.camGrip)*1.05;
-    const ideal={driver:3, wood3:0, hybrid:-1, iron5:-3, iron7:-4, iron9:-4.5, wedge:-5, sw:-5}[club]??-3, aoa=(ideal+gauss()*2)*DEG, shift=-Math.sin(aoa)*(0.62+(SL.CLUB_LEN[club]||1))+(SL.BALL_POS[club]||0);
+    const ideal={driver:3, wood3:0, hybrid:-1, iron5:-3, iron7:-4, iron9:-4.5, wedge:-5, gw:-5, sw:-5, lw:-5}[club]??-3, aoa=(ideal+gauss()*2)*DEG, shift=-Math.sin(aoa)*(0.62+(SL.CLUB_LEN[club]||1))+(SL.BALL_POS[club]||0);
     const res=SL.analyzePose(SL.synthPose({fps:30, handSpeed:hand, hand:S.hand, shift, path:gauss()*4, top:85+frac*85+gauss()*6, finish:95+frac*85, back:640+frac*220+gauss()*40, down:290+gauss()*15, sway:Math.max(0,gauss()*6), head:gauss()*4, turn:60+frac*25}), club, {grip:S.camGrip, view:S.camView});
     if(!res.error) res.sim=true; handleResult(res); return; }
   const peak=SL.omegaFor(club, ms/factor(club), S.hold)*1.005;
@@ -1002,7 +1084,7 @@ function setMode(m){
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
   document.body.classList.toggle("m-rank",m==="rank");
   $("view").hidden=m==="rank" || ((m==="data"||!has3D) && !(S.input==="camera" && camState==="on")); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
-  $("card").hidden=true; setHudMsg(null); $("holeTip").hidden=true; $("skip").hidden=true; if(aimMode){ aimMode=false; }
+  $("card").hidden=true; setHudMsg(null); $("holeTip").hidden=true; $("skip").hidden=true; if(aimMode){ aimMode=false; } renderDrill();
   if(has3D) World.setActive(m!=="data" && m!=="rank");
   if(m==="range") setupRange();
   else if(m==="course"){ if(!course) newRound(); else { builtHole=""; setupHole(false); } renderCourses(); renderScore(); }
@@ -1013,7 +1095,7 @@ function setMode(m){
 }
 document.querySelectorAll(".mode").forEach(b=>b.addEventListener("click",()=>setMode(b.dataset.mode)));
 function selectTab(name){ document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected",String(t.dataset.tab===name)));
-  document.querySelectorAll(".panel").forEach(p=>p.hidden=p.dataset.panel!==name); drawCharts(); }
+  document.querySelectorAll(".panel").forEach(p=>p.hidden=p.dataset.panel!==name); drawCharts(); renderWedges(); }
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>selectTab(t.dataset.tab)));
 $("nextHole").addEventListener("click",nextHole);
 $("newRound").addEventListener("click",()=>{ $("card").hidden=true; setHudMsg(null); newRound(); });
@@ -1024,6 +1106,8 @@ function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear()
 bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
 bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("camModel","camModel",()=>{ if(camState==="on"){ camStop(); camStart(); } });
+bindSel("bag","bag",()=>{ if(!inBag(club)) setClub("wedge",true); if(drill && !inBag(drill.c)) stopDrill(); buildChips(); suggestClub(); renderAll(); });
+$("wedgeAuto").addEventListener("click",()=>startDrill(null,null,true));
 bindSel("camSound","camSound",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camShutter","camShutter",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("alt","alt",()=>{ S.alt=+S.alt||0; saveSettings(); applyAlt(); fcache.clear(); dcache.clear(); renderAll(); });
 bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
