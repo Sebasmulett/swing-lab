@@ -17,6 +17,12 @@ En los campos colombianos se puede jugar ida (1-9), vuelta (10-18) o los 18. Los
 
 Los nombres de los campos se usan solo como referencia; la app no está afiliada a ellos.
 
+## Para bajar golpes
+
+- **Matriz de wedges** (sistema del reloj): carry de cada wedge con swings de 7:30, 9:00, 10:30 y completo, con entrenamiento guiado.
+- **Strokes Gained** por categoría (salida, al green, alrededor del green, putts) contra un hándicap 15 o el PGA Tour, más calles, greens en regulación, up & down y penalidades.
+- **Estrategia según tu dispersión**: la elipse de tus tiros sobre el hoyo y el punto de apuntar con menos golpes esperados.
+
 ## Ranking en línea
 
 El ranking usa una tabla de [Supabase](https://supabase.com) (plan gratuito):

@@ -2,11 +2,11 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.15";
+const VERSION="0.16";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", sgBase:"hcp15", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
@@ -137,7 +137,7 @@ function aimYaw(){ return yawTo(aimOrigin(),aimPoint()); }
 function aimDist(){ const o=aimOrigin(), p=aimPoint(); return Math.hypot(p.x-o.x,p.z-o.z); }
 function setAim(p,quiet){
   const o=aimOrigin(), d=Math.hypot(p.x-o.x,p.z-o.z); if(d<5) return;
-  if(mode==="course"&&course){ const h=HOLES[course.hole], auto=course.auto||{x:h.pinX,z:h.L};
+  if(mode==="course"&&course){ const h=HOLES[course.hole], auto=course.auto||{x:h.pinX,z:h.L}; course.stratClub=null; course.stratK=null;
     course.aim = Math.hypot(p.x-auto.x,p.z-auto.z)<1 ? null : Math.hypot(p.x-h.pinX,p.z-h.L)<1 ? {x:h.pinX,z:h.L} : {x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; saveCourse(); suggestClub(); }
   else { rangeAim={x:+p.x.toFixed(1),z:+p.z.toFixed(1)}; store.set("sl7_rangeAim",rangeAim); suggestClub(); }
   if(has3D){ World.setAim(aimPoint()); if(!aimMode) World.address(o.x,o.z,aimYaw(),false); }
@@ -154,12 +154,16 @@ function yardage(){
     const ico={water:"🌊 Agua",bunker:"⛱ Bunker",green:"⛳ Green",ob:"🚫 Fuera"};
     for(const [k,a,b] of seen.slice(0,3)) parts.push(`${ico[k]} ${Math.round(S.dist==="yd"?a/0.9144:a)}–${Math.round(S.dist==="yd"?b/0.9144:b)}`);
     if(caddieInfo && Math.abs(caddieInfo.wind)>=3) parts.push(`💨 juega como ${fmtDist(caddieInfo.plays)}`); }
+  if(mode==="course" && course && !course.holed){ const st=strategy();
+    if(st){ const same=(Math.hypot(st.aim.x-aimPoint().x,st.aim.z-aimPoint().z)<3 && st.c===club) || st.eCur-st.e<0.08, side=Math.abs(st.off)<2?"al centro":`${fmtDist(Math.abs(st.off))} ${st.off>0?"a la derecha":"a la izquierda"}`;
+      parts.push(same?`🧠 Buena estrategia: ${st.eCur.toFixed(1)} golpes esperados para terminar`
+        :`🧠 Mejor: ${CLUBS[st.c].name}${st.k?" "+clockAt(st.k):""}, ${side} · ${st.e.toFixed(1)} golpes esperados (ahora ${st.eCur.toFixed(1)}) <button class="mini" id="useStrat">Usar</button>`); } }
   if((mode==="course"||mode==="range") && caddieInfo && caddieInfo.clock){ const k=caddieInfo.clock; parts.push(`🕘 ${CLUBS[k.c].name} ${clockAt(k.k)} ≈ ${fmtDist(k.cell.total)}${k.cell.est?" (estimado)":""}`); }
   return parts.join(" · "); }
 function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="";
   if(mode==="course"&&course){ const h=HOLES[course.hole], q=aimPoint(); side=Math.hypot(q.x-h.pinX,q.z-h.L)<1?" · al hoyo":course.aim?"":" · ruta"; }
   const st=shotFor(club); $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`+(st!=="normal"?` · ${SL.SHOTS[st].name}`:"");
-  $("aimInfo").innerHTML=yardage(); $("aimInfo").hidden=!$("aimInfo").innerHTML; $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
+  $("aimInfo").innerHTML=yardage(); $("aimInfo").hidden=!$("aimInfo").innerHTML; { const ub=$("useStrat"); if(ub) ub.onclick=e=>{ e.stopPropagation(); useStrategy(); }; } $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
   $("aimBar").hidden=!has3D || mode==="data" || World.busy() || World.flying() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig(); void o; void p; }
 function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
   setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
@@ -191,6 +195,40 @@ function rangeShot(h){
     setTimeout(()=>{ if(seq===shotSeq && !World.busy() && mode==="range"){ World.address(0,0,yawTo({x:0,z:0},rangeAim),true); camLayer(true); setHudMsg(null); $("card").hidden=true; renderAim(); } },3800); }});
 }
 
+// ================= Strokes Gained =================
+// Golpes promedio para embocar desde cada distancia y lie (línea base del PGA Tour, aproximada de Mark Broadie,
+// "Every Shot Counts"). Distancias en yardas; en el green, en pies. La de hándicap 15 es una aproximación escalada.
+const SGB={
+  tee:[[100,2.92],[120,2.99],[140,2.97],[160,2.99],[180,3.05],[200,3.12],[220,3.17],[240,3.25],[260,3.45],[280,3.65],[300,3.71],[320,3.79],[340,3.86],[360,3.92],[380,3.96],[400,3.99],[420,4.02],[440,4.08],[460,4.17],[480,4.28],[500,4.41],[520,4.54],[540,4.65],[560,4.74],[580,4.79],[600,4.82]],
+  fairway:[[0,1.9],[5,2.1],[10,2.18],[20,2.40],[40,2.60],[60,2.70],[80,2.75],[100,2.80],[120,2.85],[140,2.91],[160,2.98],[180,3.08],[200,3.19],[220,3.32],[240,3.45],[260,3.58],[280,3.69],[300,3.78],[340,3.88],[400,4.11],[460,4.29],[520,4.66],[600,4.94]],
+  rough:[[0,2.0],[5,2.2],[10,2.34],[20,2.59],[40,2.78],[60,2.91],[80,2.96],[100,3.02],[120,3.08],[140,3.15],[160,3.23],[180,3.31],[200,3.42],[220,3.53],[240,3.64],[260,3.74],[280,3.83],[300,3.90],[400,4.25],[500,4.70],[600,5.0]],
+  sand:[[0,2.1],[5,2.3],[10,2.43],[20,2.53],[40,2.82],[60,3.15],[80,3.24],[100,3.23],[120,3.21],[140,3.22],[160,3.28],[180,3.40],[200,3.55],[220,3.70],[240,3.84],[260,3.93],[300,4.04],[400,4.4]],
+  green:[[0,1.0],[1,1.0],[2,1.01],[3,1.04],[4,1.13],[5,1.23],[6,1.34],[7,1.42],[8,1.50],[9,1.56],[10,1.61],[15,1.78],[20,1.87],[30,1.98],[40,2.06],[50,2.14],[60,2.21],[90,2.40],[150,2.6]] };
+const interp=(T,x)=>{ if(x<=T[0][0]) return T[0][1]; for(let i=1;i<T.length;i++) if(x<=T[i][0]){ const [a,va]=T[i-1], [b,vb]=T[i]; return va+(vb-va)*(x-a)/(b-a); } const n=T.length; return T[n-1][1]+(T[n-1][1]-T[n-2][1])/(T[n-1][0]-T[n-2][0])*(x-T[n-1][0]); };
+const SG_K={tour:1, hcp15:1.28};
+function expStrokes(dm, lie, base){ if(dm<0.25) return 0; const k=SG_K[base||S.sgBase||"hcp15"]||1, yd=dm/0.9144;
+  const L=lie==="green"?"green":lie==="bunker"?"sand":lie==="tee"?(yd>=100?"tee":"fairway"):lie==="fairway"?"fairway":"rough";
+  const e=L==="green"?interp(SGB.green,dm*3.28084):interp(SGB[L],yd); return 1+(e-1)*k; }
+// registro de cada golpe del hoyo: de dónde salió, dónde quedó y si hubo penalidad
+function logShot(e){ if(!course) return; course.log=course.log||{}; (course.log[course.hole]=course.log[course.hole]||[]).push(e); }
+const SG_CAT={ott:"Salida", app:"Al green", arg:"Alrededor del green", putt:"Putts"};
+function holeStats(i, base){ const L=(course.log||{})[i]; if(!L || !L.length || course.scores[i]==null) return null; const h=HOLES[i], par=h.par;
+  const sg={ott:0, app:0, arg:0, putt:0}; let fw=null, gir=false, putts=0, pen=0, sandTry=false, sandSave=false; const score=course.scores[i];
+  L.forEach((e,k)=>{ if(e.putt){ putts+=e.n; sg.putt+=expStrokes(e.d,"green",base)-e.n; return; }
+    const cat=e.lie==="tee"&&par>=4?"ott":e.d<=27.4?"arg":"app"; sg[cat]+=expStrokes(e.d,e.lie,base)-expStrokes(e.to,e.toLie,base)-1-(e.pen||0); pen+=e.pen||0;
+    if(k===0 && par>=4) fw=e.toLie==="fairway"||(e.toLie==="green");
+    if((e.toLie==="green"||e.to<0.25) && e.n<=par-2) gir=true;
+    if(e.lie==="bunker" && e.d<=27.4){ sandTry=true; sandSave=score-(e.n-1)<=2; } });
+  return {sg, fw, gir, putts, pen, sandTry, sandSave, score, par, scramble:!gir?score<=par:null}; }
+function roundStats(base){ if(!course) return null; const H=[]; HOLES.forEach((_,i)=>{ const s=holeStats(i,base); if(s) H.push(s); }); if(!H.length) return null;
+  const sum=k=>H.reduce((a,s)=>a+s.sg[k],0), fwH=H.filter(s=>s.fw!=null), sc=H.filter(s=>s.scramble!=null), sd=H.filter(s=>s.sandTry);
+  return {n:H.length, sg:{ott:sum("ott"), app:sum("app"), arg:sum("arg"), putt:sum("putt")}, fw:[fwH.filter(s=>s.fw).length,fwH.length], gir:[H.filter(s=>s.gir).length,H.length],
+    putts:H.reduce((a,s)=>a+s.putts,0), pen:H.reduce((a,s)=>a+s.pen,0), scr:[sc.filter(s=>s.scramble).length,sc.length], sand:[sd.filter(s=>s.sandSave).length,sd.length],
+    strokes:H.reduce((a,s)=>a+s.score,0), par:H.reduce((a,s)=>a+s.par,0)}; }
+let sgHist=store.get("sl16_sg",[]);
+function saveRoundStats(){ if(!course || course.sim) return; const r=roundStats("tour"); if(!r || r.n<9) return;
+  sgHist.unshift(Object.assign({at:Date.now(), c:courseId, sel:selOf(courseId), player:S.player, sgH:roundStats("hcp15").sg},r)); sgHist=sgHist.slice(0,30); store.set("sl16_sg",sgHist); }
+
 // ================= Campo =================
 const newWind=()=>{ const w=CUR.wind||[1,5.5], s=Math.random()<(w[0]>2?0.05:0.25)?0:w[0]+Math.random()*(w[1]-w[0]), a=Math.random()*Math.PI*2; return {s, x:Math.sin(a)*s, z:Math.cos(a)*s}; };
 const saveCourse=()=>{ if(course) rounds[roundKey()]=course; else delete rounds[roundKey()]; store.set("sl8_rounds",rounds); };
@@ -221,7 +259,9 @@ let tipTimer=0;
 function showTip(h){ const t=$("holeTip"); if(!h || !h.tip){ t.hidden=true; return; }
   t.innerHTML=`<b>Hoyo ${h.num} · ${h.name} · par ${h.par} · ${fmtDist(h.len)}</b>${h.tip}`; t.hidden=false; clearTimeout(tipTimer); tipTimer=setTimeout(()=>{ t.hidden=true; },10000); }
 function setupHole(announce){
-  if(!course.holed && !course.done) course.auto=routeAim();
+  if(!course.holed && !course.done){ course.auto=routeAim(); course.stratClub=null; course.stratK=null;
+    // si tu patrón de tiros dice que otro objetivo ahorra golpes, el objetivo automático pasa a ser ese
+    if(!course.aim){ stratCache.key=""; const st=strategy(); if(st && st.eCur-st.e>=0.25){ course.auto=st.aim; course.stratClub=st.c; course.stratK=st.k; stratCache.key=""; } } }
   const key=courseId+":"+course.hole;
   if(has3D){ if(builtHole!==key || announce){ World.setScenery(CUR.scenery); World.setHole(HOLES[course.hole]); builtHole=key; }
     World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),true);
@@ -270,13 +310,62 @@ function caddie(){
 }
 function suggestClub(){
   if(mode==="range"){ const R=Math.hypot(rangeAim.x,rangeAim.z); let b=null; for(const c of SL.CLUB_ORDER.filter(inBag)){ const t=expectedTotal(c,"tee"), k=t<R?(R-t)*1.3:t-R; if(!b||k<b.k) b={c,k}; }
-    caddieInfo=null; const pk=R<=maxWedge()*1.04 ? clockPick(R) : null; if(pk) caddieInfo={clock:pk}; suggested=pk?pk.c:b.c; renderChips(); renderAim(); return; }
-  if(mode!=="course" || !course || course.holed){ suggested=null; caddieInfo=null; renderChips(); return; }
+    caddieInfo=null; if(has3D) World.setPattern(null); const pk=R<=maxWedge()*1.04 ? clockPick(R) : null; if(pk) caddieInfo={clock:pk}; suggested=pk?pk.c:b.c; renderChips(); renderAim(); return; }
+  if(mode!=="course" || !course || course.holed){ suggested=null; caddieInfo=null; if(has3D) World.setPattern(null); renderChips(); return; }
   caddieInfo=caddie(); suggested=caddieInfo?caddieInfo.club:club;
   // dentro del alcance de los wedges: qué wedge y a qué hora del reloj, según tu matriz
   if(caddieInfo && course.lie!=="green" && caddieInfo.plays<=maxWedge()*1.04){ const pk=clockPick(caddieInfo.plays); if(pk){ caddieInfo.clock=pk; suggested=pk.c; } }
-  if(suggested!==club) setClub(suggested,true); renderChips(); renderAim();
+  if(course.stratClub && inBag(course.stratClub)){ suggested=course.stratClub; if(caddieInfo) caddieInfo.clock=course.stratK?{c:course.stratClub,k:course.stratK,cell:wedgeMatrix()[course.stratClub][course.stratK]}:null; }
+  if(suggested!==club) setClub(suggested,true); renderChips(); renderAim(); if(has3D) World.setPattern(patternFor());
 }
+// ===== Estrategia según tu dispersión (gestión de campo) =====
+// Tu patrón con cada palo: hacia dónde fallas en promedio (sesgo) y cuánto se abren tus tiros de lado y de largo.
+// Con pocos tiros se mezcla con un patrón típico de aficionado (7% de la distancia de lado, 5% de largo).
+const patCache=new Map();
+function patternOf(c){ const key=c+"|"+history.length+"|"+(history[0]&&history[0].id)+"|"+SL.env.alt; if(patCache.has(key)) return patCache.get(key);
+  const d=history.filter(h=>!h.sim && h.club===c && !["730","900","1030"].includes(clockOf(h))).slice(0,25).map(derive), n=d.length;
+  const exp=expectedTotal(c,"tee"), defL=0.07*exp+2, defD=0.05*exp+3; let out;
+  if(n<2) out={n, bias:0, sl:defL, sd:defD};
+  else { const ml=d.reduce((a,x)=>a+x.lat,0)/n, mt=d.reduce((a,x)=>a+x.total,0)/n, sl=Math.sqrt(d.reduce((a,x)=>a+(x.lat-ml)**2,0)/(n-1)), sd=Math.sqrt(d.reduce((a,x)=>a+(x.total-mt)**2,0)/(n-1)), w=Math.min(1,n/8);
+    out={n, bias:ml*w, sl:Math.max(3,w*sl+(1-w)*defL), sd:Math.max(3,w*sd+(1-w)*defD)}; }
+  patCache.set(key,out); if(patCache.size>60) patCache.clear(); return out; }
+// cuadratura gaussiana 5×5 sobre la elipse (±2,2 σ)
+const GQ=(()=>{ const z=[-2.2,-1.1,0,1.1,2.2], w=z.map(v=>Math.exp(-v*v/2)), s=w.reduce((a,b)=>a+b,0); return z.map((v,i)=>[v,w[i]/s]); })();
+let stratCache={key:"",res:null};
+function strategy(){
+  if(mode!=="course"||!course||course.holed||course.done||course.lie==="green") return null;
+  const hole=HOLES[course.hole], o=course.ball, pin={x:hole.pinX,z:hole.L}, R=Math.hypot(pin.x-o.x,pin.z-o.z), w=course.wind[course.hole], base=S.sgBase||"hcp15";
+  if(R<45) return null;
+  const cur=aimPoint(), key=[course.hole,o.x,o.z,course.lie,cur.x,cur.z,history.length,base,S.bag,club].join("|"); if(stratCache.key===key) return stratCache.res;
+  const yaw=yawTo(o,pin), f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw), wl=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]], E0=expStrokes(R,course.lie,base);
+  const toW=(lx,lz)=>({x:o.x+r[0]*lx+f[0]*lz, z:o.z+r[1]*lx+f[1]*lz}), ground=(lx,lz)=>{ const q=toW(lx,lz); return SL.lieAt(hole,q.x,q.z); };
+  const cost=p=>{ const lie=SL.lieAt(hole,p.x,p.z), dp=Math.hypot(p.x-pin.x,p.z-pin.z);
+    return lie==="water"?2+expStrokes(dp,"rough",base) : lie==="ob"?2+E0 : 1+expStrokes(dp,lie,base); };
+  // opciones: cada palo con swing completo y, a tiro de wedge, cada casilla de tu matriz
+  const opts=[];
+  for(const c of allowedClubs(course.lie)){ const sim=SL.simulateLocal(launch(c,clubSpeed(c),{shot:shotFor(c)},course.lie),wl,ground), tot=sim.z;
+    if(tot<R*0.3 || tot>R+30) continue; const P=patternOf(c); opts.push({c, k:null, tot, drift:sim.x, P}); }
+  if(R<=maxWedge()*1.1){ const M=wedgeMatrix(); for(const c of bagWedges()) for(const p of CLOCK){ if(p.k==="full") continue; const cell=M[c][p.k]; if(Math.abs(cell.total-R)>25) continue;
+    const P=patternOf(c), kk=cell.total/Math.max(1,M[c].full.total); opts.push({c, k:p.k, tot:cell.total, drift:0, P:{n:P.n, bias:P.bias*kk, sl:Math.max(2.5,P.sl*kk), sd:Math.max(2.5,P.sd*kk*1.1)}}); } }
+  if(!opts.length) return null;
+  opts.sort((a,b)=>Math.abs(a.tot-R)-Math.abs(b.tot-R)); const cand=opts.slice(0,7);
+  const ES=(op,a)=>{ let s=0; for(const [gx,wx] of GQ) for(const [gz,wz] of GQ) s+=wx*wz*cost(toW(a+op.drift+op.P.bias+gx*op.P.sl, op.tot+gz*op.P.sd)); return s; };
+  let best=null;
+  for(const op of cand){ const st=Math.max(1.5,op.P.sl/2); for(let a=-2.5*op.P.sl; a<=2.5*op.P.sl+1e-6; a+=st){ const e=ES(op,a); if(!best||e<best.e) best={op,a,e}; } }
+  // tu objetivo actual con el palo que tienes en la mano
+  const curOp=cand.find(x=>x.c===club && !x.k) || cand.find(x=>x.c===club) || cand[0], cl=r[0]*(cur.x-o.x)+r[1]*(cur.z-o.z), cf=f[0]*(cur.x-o.x)+f[1]*(cur.z-o.z);
+  const eCur=ES(curOp, cl/Math.max(1,cf)*curOp.tot);
+  const aim=toW(best.a, best.op.tot), res={c:best.op.c, k:best.op.k, e:best.e, eCur, curC:curOp.c, aim:{x:+aim.x.toFixed(1), z:+aim.z.toFixed(1)}, off:best.a, tot:best.op.tot, P:best.op.P, drift:best.op.drift, yaw};
+  stratCache={key,res}; return res; }
+function patternFor(){ // la elipse que se dibuja: tu patrón con el palo en la mano hacia el objetivo actual
+  if(mode!=="course"||!course||course.holed||course.done||course.lie==="green") return null;
+  const o=course.ball, p=aimPoint(), yaw=yawTo(o,p), d=Math.hypot(p.x-o.x,p.z-o.z); if(d<35) return null;
+  const P=course.stratClub&&course.stratK ? null : patternOf(club); const pp=P||patternOf(club), r=rightOf(yaw), f=[Math.sin(yaw),Math.cos(yaw)];
+  const ck=caddieInfo&&caddieInfo.clock&&caddieInfo.clock.c===club ? caddieInfo.clock.cell.total/Math.max(1,wedgeMatrix()[club]?wedgeMatrix()[club].full.total:1) : 1;
+  return {x:p.x+r[0]*pp.bias*ck, z:p.z+r[1]*pp.bias*ck, yaw, sl:Math.max(2.5,pp.sl*ck), sd:Math.max(2.5,pp.sd*ck), n:pp.n}; }
+function useStrategy(){ const s=strategy(); if(!s) return; setAim(s.aim,true); course.stratClub=s.c; course.stratK=s.k; saveCourse(); setClub(s.c,true); suggestClub(); beep(1200,0.03);
+  say(`Apunta ${Math.abs(s.off)<2?"al centro":Math.round(Math.abs(s.off))+" metros a la "+((s.off>0)?"derecha":"izquierda")} con ${CLUBS[s.c].name}${s.k?" "+clockAt(s.k):""}.`); }
+
 // ===== Matriz de wedges =====
 // Cada casilla: mediana de carry y total de tus últimos swings reales con ese wedge y ese largo de swing.
 // Sin datos, se estima con tu velocidad de ese palo y la fracción típica de cada largo (estimado).
@@ -350,7 +439,7 @@ function celebrate(strokes,par){ const d=strokes-par, el=$("celebrate"); if(!el)
   clearTimeout(celebrate.t); celebrate.t=setTimeout(()=>{ el.hidden=true; el.innerHTML=""; },3200); }
 function finishHole(text,voice){
   course.holed=true; course.scores[course.hole]=course.strokes; course.auto=null; celebrate(course.strokes,HOLES[course.hole].par);
-  if(course.hole===HOLES.length-1){ course.done=true; const tot=course.scores.reduce((a,b)=>a+b,0), par=parOf(), dd=tot-par, rec=recOf(courseId);
+  if(course.hole===HOLES.length-1){ course.done=true; saveRoundStats(); const tot=course.scores.reduce((a,b)=>a+b,0), par=parOf(), dd=tot-par, rec=recOf(courseId);
     if(!course.sim && (rec==null || tot<rec)){ records[recKey()]=tot; store.set("sl2_records",records); voice+=" ¡Nuevo récord en "+CUR.name+"!"; }
     if(course.sim) text+=" · con golpes de prueba: no entra al ranking";
     else { const pos=addEntry("rounds",{v:tot, d:tot-par, c:courseId, sel:selOf(courseId), sc:course.scores.slice()}); if(pos===1) voice+=" ¡Primer lugar del ranking!"; else if(pos<=3) voice+=` Quedas ${pos}º en el ranking.`; }
@@ -365,7 +454,7 @@ function courseShot(h){
   if(course.done){ say("La ronda terminó. Empieza una nueva."); return; }
   if(course.holed) nextHole();
   if(aimMode) toggleAimView(false);
-  const hole=HOLES[course.hole], yaw=aimYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole], tgt=aimPoint();
+  const hole=HOLES[course.hole], yaw=aimYaw(), ox=course.ball.x, oz=course.ball.z, w=course.wind[course.hole], tgt=aimPoint(), fromD=distToPin(), fromLie=course.lie;
   if(h.sim) course.sim=true;
   const f=[Math.sin(yaw),Math.cos(yaw)], r=rightOf(yaw), windLocal=[w.x*r[0]+w.z*r[1], w.x*f[0]+w.z*f[1]];
   const toLocal=(x,z)=>[r[0]*(x-ox)+r[1]*(z-oz), f[0]*(x-ox)+f[1]*(z-oz)];
@@ -397,6 +486,7 @@ function courseShot(h){
         course.ball={x:+d.x.toFixed(1), z:+d.z.toFixed(1)}; const l=SL.lieAt(hole,d.x,d.z); course.lie=["water","ob","green"].includes(l)?"rough":l;
         text=`${tx[0]} +1 de penalidad`; voice=`${tx[1]} Un golpe de penalidad. Dropeas ${hole.drop?"en la zona de dropeo":"cerca de donde entró"}.`; }
       else { text="Fuera de límites · +1"; voice="Fuera de límites. Penalidad de un golpe. Juegas de nuevo desde el mismo sitio."; }
+      logShot({d:fromD, lie:fromLie, to:distToPin(), toLie:course.lie, pen:1, n:course.strokes, club:h.club});
       setHudMsg(text); say(voice);
       if(course.strokes>=hole.par+5){ finishHole("Máximo de golpes · recoges la bola","Llegaste al máximo de golpes en este hoyo."); return; }
       saveCourse(); renderHud(); renderScore(); drawMini(); suggestClub();
@@ -404,6 +494,7 @@ function courseShot(h){
     }
     if(!h.sim && h.club==="driver") addEntry("drives",{v:+Math.hypot(fx-ox,fz-oz).toFixed(1), c:courseId});
     course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; course.aim=null; drawMini();
+    { const dd=distToPin(); logShot({d:fromD, lie:fromLie, to:dd<0.3?0:dd, toLie:dd<0.3?"green":endLie, n:course.strokes, club:h.club}); }
     if(Math.hypot(tgt.x-hole.pinX,tgt.z-hole.L)>1) setTimeout(()=>{ if(seq===shotSeq) say(`A ${sayDist(Math.hypot(fx-tgt.x,fz-tgt.z))} del objetivo.`); },2200);
     const d=distToPin();
     if(d<0.3){ const diff=course.strokes-hole.par, name=course.strokes===1?"¡Hoyo en uno!":(RESULT[diff]||(diff>0?`+${diff}`:`${diff}`));
@@ -412,11 +503,11 @@ function courseShot(h){
       const n=puttsFor(d); setHudMsg(`${chip?"Chip · ":""}En el green a ${fmtDist(d)}`); say(`En el green a ${sayDist(d)}.`);
       setTimeout(()=>{ if(seq!==shotSeq) return; setHudMsg(null); $("card").hidden=true;
         World.playPutts({from:{x:fx,z:fz}, pin:{x:hole.pinX,z:hole.L}, n, onPutt:()=>sfx.putt(), onHole:()=>sfx.cup(), onEnd:()=>{
-          course.strokes+=n; const diff=course.strokes-hole.par, name=RESULT[diff]||(diff>0?`+${diff}`:`${diff}`);
+          course.strokes+=n; logShot({putt:true, d, n}); const diff=course.strokes-hole.par, name=RESULT[diff]||(diff>0?`+${diff}`:`${diff}`);
           course.ball={x:hole.pinX,z:hole.L}; finishHole(`${n} putt${n>1?"s":""} · ${name}`, `${n} putt${n>1?"s":""}. ${name}.`); }}); },1800);
       return;
     }
-    if(course.strokes>=hole.par+5){ course.strokes+=1; finishHole("Máximo de golpes · recoges la bola","Llegaste al máximo de golpes en este hoyo."); return; }
+    if(course.strokes>=hole.par+5){ course.strokes+=1; logShot({d, lie:endLie, to:0, toLie:"green", n:course.strokes, pickup:true}); finishHole("Máximo de golpes · recoges la bola","Llegaste al máximo de golpes en este hoyo."); return; }
     const lieName={fairway:"En la calle",rough:"En el rough",bunker:"En el bunker",tee:"En el tee",road:"En el camino"}[endLie]||"";
     setHudMsg(`${tree?"¡Árbol! ":chip?"Chip · ":""}${lieName} · faltan ${fmtDist(d)}`); say(`${tree?"Pegó en un árbol. ":""}${lieName}. Faltan ${sayDist(d)}.`);
     saveCourse(); renderHud(); renderScore(); suggestClub();
@@ -451,9 +542,39 @@ function renderScore(){
   tbl.innerHTML = HOLES.length>9 ? part(0,9,"Ida")+part(9,18,"Vuelta") : part(0,HOLES.length,"Total");
   $("scoreTot").textContent = HOLES.length>9 ? `Total: ${tot||"—"} · par ${par}` : "";
   $("nextHole").hidden=!(course.holed && !course.done);
+  renderStats();
   $("courseNote").textContent = course.done ? `Ronda terminada en ${CUR.name}: ${tot} golpes (${tot-par===0?"par del campo":tot-par>0?"+"+(tot-par):tot-par}).`+(rec?` Tu récord aquí: ${rec}.`:"")
     : CUR.desc+" Los putts se juegan solos según la distancia y el viento cambia en cada hoyo."+(rec?` Tu récord aquí: ${rec} golpes.`:"");
 }
+// ===== Estadísticas de la ronda =====
+let statScope="round";
+function renderStats(){ const cv=$("sgChart"); if(!cv || cv.closest("[hidden]")) return; const base=S.sgBase||"hcp15", vs=base==="tour"?"el PGA Tour":"un hándicap 15";
+  let R=null, label="";
+  if(statScope==="round"){ R=roundStats(base); label=R?`en ${R.n} hoyo${R.n>1?"s":""}`:""; }
+  else { const L=sgHist.filter(r=>r.player===S.player||!r.player).slice(0,10); if(L.length){ const per=r=>18/r.n, avg=f=>L.reduce((a,r)=>a+f(r)*per(r),0)/L.length, sgOf=r=>base==="tour"?r.sg:(r.sgH||r.sg);
+      R={n:18, sg:{ott:avg(r=>sgOf(r).ott), app:avg(r=>sgOf(r).app), arg:avg(r=>sgOf(r).arg), putt:avg(r=>sgOf(r).putt)},
+        fw:[L.reduce((a,r)=>a+r.fw[0],0),L.reduce((a,r)=>a+r.fw[1],0)], gir:[L.reduce((a,r)=>a+r.gir[0],0),L.reduce((a,r)=>a+r.gir[1],0)],
+        putts:avg(r=>r.putts), pen:avg(r=>r.pen), scr:[L.reduce((a,r)=>a+r.scr[0],0),L.reduce((a,r)=>a+r.scr[1],0)], sand:[L.reduce((a,r)=>a+r.sand[0],0),L.reduce((a,r)=>a+r.sand[1],0)], avgRound:true}; label=`promedio por 18 hoyos en ${L.length} ronda${L.length>1?"s":""}`; } }
+  const g=canvasFor("sgChart"); if(!g) return; const {c,W,H}=g, ink=css("--ink"), mut=css("--muted"), line=css("--line");
+  if(!R){ c.fillStyle=mut; c.font="12px "+css("--body"); c.textAlign="center"; c.fillText(statScope==="round"?"Termina un hoyo para ver tus estadísticas":"Termina una ronda de 9 o 18 hoyos para ver el promedio",W/2,H/2);
+    $("statTiles").innerHTML=""; $("statNote").textContent=""; return; }
+  const cats=["ott","app","arg","putt"], tot=cats.reduce((a,k)=>a+R.sg[k],0), rows=[...cats.map(k=>[SG_CAT[k],R.sg[k],false]),["Total",tot,true]];
+  const mx=Math.max(1.5,...rows.map(r=>Math.abs(r[1])))*1.15, L0=118, Rr=46, cx=L0+(W-L0-Rr)/2, sc=(W-L0-Rr)/2/mx, rh=(H-22)/rows.length;
+  c.strokeStyle=line; c.lineWidth=1; c.beginPath(); c.moveTo(cx,4); c.lineTo(cx,H-18); c.stroke();
+  c.fillStyle=mut; c.font="10px "+css("--body"); c.textAlign="center"; c.fillText("pierdes",cx-(W-L0-Rr)/4,H-5); c.fillText("ganas",cx+(W-L0-Rr)/4,H-5);
+  rows.forEach(([name,v,bold],i)=>{ const y=6+i*rh, bh=Math.min(18,rh-8), by=y+(rh-bh)/2;
+    if(bold){ c.strokeStyle=line; c.beginPath(); c.moveTo(4,y); c.lineTo(W-4,y); c.stroke(); }
+    c.fillStyle=ink; c.font=(bold?"700 ":"500 ")+"12px "+css("--body"); c.textAlign="left"; c.fillText(name,4,by+bh-4);
+    const w=Math.abs(v)*sc, x0=v>=0?cx:cx-w; c.fillStyle=v>=0?css("--green"):"#c4553a"; c.beginPath(); if(c.roundRect) c.roundRect(x0,by,Math.max(2,w),bh,v>=0?[0,4,4,0]:[4,0,0,4]); else c.rect(x0,by,Math.max(2,w),bh); c.fill();
+    c.fillStyle=ink; c.font="600 12px "+css("--body"); c.textAlign="right"; c.fillText((v>0?"+":v<0?"−":"")+Math.abs(v).toFixed(1),W-4,by+bh-4); });
+  const pct=a=>a[1]?`${a[0]}/${a[1]}`:"—", pc=a=>a[1]?` · ${Math.round(a[0]/a[1]*100)}%`:"";
+  const tiles=[["Calles",pct(R.fw),pc(R.fw)],["Greens en regulación",pct(R.gir),pc(R.gir)],["Putts",R.avgRound?R.putts.toFixed(1):String(R.putts),R.avgRound?" por ronda":` · ${(R.putts/R.n).toFixed(1)} por hoyo`],
+    ["Up & down",pct(R.scr),pc(R.scr)],["Salidas de bunker",pct(R.sand),pc(R.sand)],["Penalidades",R.avgRound?R.pen.toFixed(1):String(R.pen),R.avgRound?" por ronda":""]];
+  $("statTiles").innerHTML=tiles.map(([k,v,s])=>`<div><span>${k}</span><strong>${v}</strong><small>${s.replace(/^ · /,"")}</small></div>`).join("");
+  const worst=cats.reduce((a,k)=>R.sg[k]<R.sg[a]?k:a,cats[0]), best=cats.reduce((a,k)=>R.sg[k]>R.sg[a]?k:a,cats[0]);
+  const tip={ott:"Prioriza calles: con la salida en juego el resto del hoyo se vuelve más fácil. Usa la estrategia según tu dispersión.", app:"Trabaja los hierros y la elección de palo: apunta al centro del green, no siempre a la bandera.",
+    arg:"Llena tu matriz de wedges y practica chips: es donde un amateur ahorra más golpes.", putt:"Practica putts de 1 a 2 metros y el control de distancia en los largos."}[worst];
+  $("statNote").innerHTML=`Comparado con ${vs}, ${label}. `+(R.sg[worst]<-0.3?`Donde más golpes pierdes: <b>${SG_CAT[worst].toLowerCase()}</b> (${R.sg[worst].toFixed(1).replace("-","−")}). ${tip}`:"Vas parejo en todo.")+(R.sg[best]>0.3?` Tu fuerte: ${SG_CAT[best].toLowerCase()} (+${R.sg[best].toFixed(1)}).`:""); }
 function renderSel(){ const box=$("selSeg"); box.hidden=CUR.n<=9; if(CUR.n<=9) return; const cur=selOf(courseId);
   box.innerHTML=["front","back","all"].map(k=>`<button data-s="${k}" aria-pressed="${k===cur}">${SEL_NAME[k]}</button>`).join("");
   box.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>selectSel(b.dataset.s))); }
@@ -491,6 +612,9 @@ function drawMini(){
   c.fillStyle="#95d068"; ell(h.green,0); c.fill();
   c.fillStyle="#d9d2c0"; h.buildings.forEach(b=>{ c.save(); c.translate(X(b.x),Y(b.z)); c.rotate(b.rot); c.fillRect(-b.w*sc/2,-b.d*sc/2,Math.max(1.5,b.w*sc),Math.max(1.5,b.d*sc)); c.restore(); });
   c.strokeStyle="rgba(255,255,255,.85)"; c.lineWidth=1; course.lines.forEach(l=>{ c.beginPath(); c.moveTo(X(l[0].x),Y(l[0].z)); c.lineTo(X(l[l.length-1].x),Y(l[l.length-1].z)); c.stroke(); });
+  const pt=patternFor(); if(pt){ const r=rightOf(pt.yaw), f=[Math.sin(pt.yaw),Math.cos(pt.yaw)];
+    for(const [k,al] of [[2,0.18],[1,0.32]]){ c.beginPath(); for(let i=0;i<=40;i++){ const t=i/40*Math.PI*2, lx=Math.cos(t)*pt.sl*k, lz=Math.sin(t)*pt.sd*k, x=pt.x+r[0]*lx+f[0]*lz, z=pt.z+r[1]*lx+f[1]*lz; i?c.lineTo(X(x),Y(z)):c.moveTo(X(x),Y(z)); }
+      c.fillStyle=`rgba(255,207,51,${al})`; c.fill(); c.strokeStyle="rgba(255,255,255,.8)"; c.lineWidth=0.8; c.stroke(); } }
   if(!course.holed){ const a=aimPoint(); c.setLineDash([2,2]); c.strokeStyle="rgba(255,207,51,.9)"; c.beginPath(); c.moveTo(X(course.ball.x),Y(course.ball.z)); c.lineTo(X(a.x),Y(a.z)); c.stroke(); c.setLineDash([]); }
   c.fillStyle="#d8392b"; c.fillRect(X(h.pinX)-1,Y(h.L)-7,2,7);
   const b=course.ball; c.fillStyle="#fff"; c.strokeStyle="#000"; c.beginPath(); c.arc(X(b.x),Y(b.z),2.6,0,Math.PI*2); c.fill(); c.stroke();
@@ -1106,6 +1230,8 @@ function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear()
 bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
 bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("camModel","camModel",()=>{ if(camState==="on"){ camStop(); camStart(); } });
+bindSel("sgBase","sgBase",()=>renderStats());
+document.querySelectorAll("#statScope button").forEach(b=>b.addEventListener("click",()=>{ statScope=b.dataset.s; document.querySelectorAll("#statScope button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); renderStats(); }));
 bindSel("bag","bag",()=>{ if(!inBag(club)) setClub("wedge",true); if(drill && !inBag(drill.c)) stopDrill(); buildChips(); suggestClub(); renderAll(); });
 $("wedgeAuto").addEventListener("click",()=>startDrill(null,null,true));
 bindSel("camSound","camSound",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camShutter","camShutter",()=>{ if(camState==="on"){ camStop(); camStart(); } });

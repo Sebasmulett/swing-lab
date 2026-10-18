@@ -1,6 +1,6 @@
 // Swing Lab: funciona sin conexión en el campo de práctica
-const CACHE = "swing-lab-v0.15";
-const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.15", "./js/courses.js?v=0.15", "./js/world3d.js?v=0.15", "./js/sound.js?v=0.15", "./js/sound-worklet.js?v=0.15", "./js/camera.js?v=0.15", "./js/online-config.js?v=0.15", "./js/online.js?v=0.15", "./js/app.js?v=0.15", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
+const CACHE = "swing-lab-v0.16";
+const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.16", "./js/courses.js?v=0.16", "./js/world3d.js?v=0.16", "./js/sound.js?v=0.16", "./js/sound-worklet.js?v=0.16", "./js/camera.js?v=0.16", "./js/online-config.js?v=0.16", "./js/online.js?v=0.16", "./js/app.js?v=0.16", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

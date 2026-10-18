@@ -400,6 +400,10 @@ W3.address=function(x,z,yaw,immediate){
   S.aimView=false;
 };
 // ---------------- apuntar (estilo TrackMan) ----------------
+// patrón de dispersión del jugador: elipses de 1 y 2 desviaciones (≈40% y ≈86% de los tiros), orientadas con el tiro
+let patG=null;
+W3.setPattern=function(p){ S.pattern=p||null; if(!patG) return; patG.visible=!!p; if(!p) return;
+  patG.position.set(p.x,0.07,p.z); patG.rotation.y=Math.PI+p.yaw; patG.children[0].scale.set(p.sl,1,p.sd); patG.children[1].scale.set(p.sl,1,p.sd); patG.children[2].scale.set(2*p.sl,1,2*p.sd); patG.children[3].scale.set(2*p.sl,1,2*p.sd); };
 W3.setAim=function(p){ S.aim=p?{x:p.x,z:p.z}:null; if(aimRing) aimRing.visible=!!p; };
 W3.pick=function(cx,cy){ if(!W3.ok) return null; const r=canvas.getBoundingClientRect();
   const ndc=new T.Vector2(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1), rc=new T.Raycaster(); rc.setFromCamera(ndc,camera);
@@ -497,7 +501,7 @@ function update(dt){
   S.linesData.forEach((l,i)=>linePool[i] && linePool[i].set(l));
   // objetivo y línea de mira (solo en address)
   const showAim=!!S.aim && !S.anim && !S.putt;
-  aimRing.visible=showAim; aimDisc.visible=showAim;
+  aimRing.visible=showAim; aimDisc.visible=showAim; if(patG) patG.visible=!!S.pattern && !S.anim && !S.putt && !S.fly;
   if(showAim){ const a=S.aim, dd=camera.position.distanceTo(new T.Vector3(a.x,0,a.z)), sc=Math.max(1,dd/32)*(1+0.06*Math.sin(now*4));
     aimRing.position.set(a.x,0.08,a.z); aimRing.scale.setScalar(sc); aimDisc.position.set(a.x,0.07,a.z); aimDisc.scale.setScalar(sc);
     const b=S.address, n=40, pts=[]; for(let i=0;i<=n;i++){ const k=i/n; pts.push([b.x+(a.x-b.x)*k, 0.09, b.z+(a.z-b.z)*k]); } aimLine.set(pts); }
@@ -565,6 +569,9 @@ W3.init=function(cv){
   trOuter=new SSLine(600,0x101010,6.5,0.28); trCore=new SSLine(600,0xffcf33,3,1); scene.add(trOuter.mesh,trCore.mesh);
   aimLine=new SSLine(48,0xffffff,2.2,0.75); scene.add(aimLine.mesh);
   aimRing=new T.Mesh(new T.RingGeometry(1.25,1.6,48).rotateX(-Math.PI/2), new T.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.95, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-8, polygonOffsetUnits:-16}));
+  { const mk=(g,col,op,f)=>new T.Mesh(g,new T.MeshBasicMaterial({color:col, transparent:true, opacity:op, depthWrite:false, polygonOffset:true, polygonOffsetFactor:f, polygonOffsetUnits:f*2}));
+    patG=new T.Group(); patG.add(mk(new T.CircleGeometry(1,48).rotateX(-Math.PI/2),0xffcf33,0.3,-5), mk(new T.RingGeometry(0.94,1,64).rotateX(-Math.PI/2),0xffffff,0.95,-6),
+      mk(new T.CircleGeometry(1,48).rotateX(-Math.PI/2),0xffcf33,0.12,-4), mk(new T.RingGeometry(0.97,1,64).rotateX(-Math.PI/2),0xffffff,0.7,-6)); patG.visible=false; scene.add(patG); }
   aimDisc=new T.Mesh(new T.CircleGeometry(1.25,40).rotateX(-Math.PI/2), new T.MeshBasicMaterial({color:0xffcf33, transparent:true, opacity:0.35, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-7, polygonOffsetUnits:-14}));
   aimRing.visible=aimDisc.visible=false; scene.add(aimRing,aimDisc);
   clock=new T.Clock();

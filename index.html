@@ -107,6 +107,13 @@ h1 span{color:var(--accent)}
 .clubs::-webkit-scrollbar{display:none}
 .clubs .chip{flex:0 0 auto;min-width:76px;scroll-snap-align:center}
 #swingViz{height:190px}
+#aimInfo button.mini{border:0;border-radius:999px;background:var(--accent);color:var(--accent-ink);font:700 .78rem var(--body);padding:3px 10px;margin-left:4px;cursor:pointer;pointer-events:auto}
+.statBar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.statBar .seg{flex:1;min-width:220px}
+.statBar select{width:auto}
+#sgChart{height:178px}
+.kpis.stats{grid-template-columns:repeat(3,1fr);margin-top:8px}
+.kpis.stats small{display:block;color:var(--muted);font-size:.72rem;font-weight:400}
 .drillTip{pointer-events:auto;padding:7px 34px 7px 10px;font-size:.8rem}
 .drillTip b{font-size:.9rem}
 .drillTip .x{position:absolute;right:6px;top:6px;border:0;background:transparent;color:#fff;font-size:1rem;padding:4px 8px;cursor:pointer}
@@ -382,6 +389,15 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button class="ghost" id="toRank">🏆 Ranking</button>
     </div>
     <p class="note" id="courseNote"></p>
+    <h2>Estadísticas</h2>
+    <div class="statBar">
+      <div class="seg" id="statScope" role="group" aria-label="Qué rondas"><button data-s="round" aria-pressed="true">Esta ronda</button><button data-s="hist" aria-pressed="false">Últimas rondas</button></div>
+      <select id="sgBase" aria-label="Comparar contra"><option value="hcp15">vs. hándicap 15</option><option value="tour">vs. PGA Tour</option></select>
+    </div>
+    <canvas class="plot" id="sgChart" aria-label="Strokes Gained por categoría"></canvas>
+    <div class="kpis stats" id="statTiles"></div>
+    <p class="note" id="statNote"></p>
+    <p class="note">El <b>Strokes Gained</b> (Mark Broadie) compara cada golpe con lo que haría el jugador de referencia desde el mismo sitio: un número positivo es ganar golpes, negativo es perderlos. Así ves si tus golpes se van en la salida, al green, alrededor del green o en los putts. Los putts todavía los juega la app según la distancia, así que su número es solo de referencia.</p>
     <p class="note">Los hoyos están inspirados en los reales: misma distancia y forma, y las trampas (agua, bunkers, fuera de límites, árboles) en su lugar. El objetivo automático sigue la ruta del hoyo: si el green no está a tu alcance, apunta a la zona de aterrizaje. Puedes cambiarlo tocando el pasto; <b>Auto</b> lo devuelve. A menos de 40 m del objetivo el golpe es un <b>chip asistido</b>: un swing suave no se mide bien, así que la distancia se ajusta al objetivo y tu cara y tu ruta deciden la dirección.</p>
   </section>
 
@@ -598,13 +614,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.15"></script>
-<script src="js/courses.js?v=0.15"></script>
-<script src="js/world3d.js?v=0.15"></script>
-<script src="js/sound.js?v=0.15"></script>
-<script src="js/camera.js?v=0.15"></script>
-<script src="js/online-config.js?v=0.15"></script>
-<script src="js/online.js?v=0.15"></script>
-<script src="js/app.js?v=0.15"></script>
+<script src="js/engine.js?v=0.16"></script>
+<script src="js/courses.js?v=0.16"></script>
+<script src="js/world3d.js?v=0.16"></script>
+<script src="js/sound.js?v=0.16"></script>
+<script src="js/camera.js?v=0.16"></script>
+<script src="js/online-config.js?v=0.16"></script>
+<script src="js/online.js?v=0.16"></script>
+<script src="js/app.js?v=0.16"></script>
 </body>
 </html>
