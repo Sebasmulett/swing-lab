@@ -2,11 +2,11 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.16";
+const VERSION="0.17";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
-const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", sgBase:"hcp15", alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
+const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", sgBase:"hcp15", ambient:true, alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
 let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
@@ -111,7 +111,42 @@ function noise(dur,freq,q,gain,type){ const a=audio(); if(!a) return; try{
   for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);
   const s=a.createBufferSource(), f=a.createBiquadFilter(), g=a.createGain(); f.type=type||"bandpass"; f.frequency.value=freq; f.Q.value=q; g.gain.value=gain;
   s.buffer=b; s.connect(f); f.connect(g); g.connect(a.destination); s.start(); if(SL.Sound) SL.Sound.mute(a.currentTime,dur); }catch(_){} }
-const sfx={ hit:()=>noise(0.07,2600,1.2,1), land:()=>noise(0.12,320,0.8,0.7,"lowpass"), putt:()=>noise(0.05,1800,2,0.5), cup:()=>{ noise(0.08,900,3,0.6); setTimeout(()=>noise(0.06,1200,3,0.4),90); }, splash:()=>noise(0.45,700,0.5,0.6,"lowpass") };
+// tono corto que se apaga (el "ping" metálico del driver, el golpe seco de los hierros)
+function tone(f,d,gain,type){ const a=audio(); if(!a) return; try{ const o=a.createOscillator(), g=a.createGain(), t0=a.currentTime; o.type=type||"sine"; o.frequency.value=f;
+  g.gain.setValueAtTime(gain,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+d); o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0+d+0.02); if(SL.Sound) SL.Sound.mute(t0,d); }catch(_){} }
+// silbido del palo: ruido filtrado que sube de tono justo antes del impacto
+function whoosh(dur){ const a=audio(); if(!a) return; try{ dur=dur||0.22; const n=Math.floor(a.sampleRate*dur), b=a.createBuffer(1,n,a.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<n;i++){ const u=i/n; d[i]=(Math.random()*2-1)*Math.sin(Math.PI*u)*Math.pow(u,0.8); }
+  const s=a.createBufferSource(), f=a.createBiquadFilter(), g=a.createGain(), t0=a.currentTime; f.type="bandpass"; f.Q.value=1.4; f.frequency.setValueAtTime(350,t0); f.frequency.exponentialRampToValueAtTime(1600,t0+dur);
+  g.gain.value=0.5; s.buffer=b; s.connect(f); f.connect(g); g.connect(a.destination); s.start(); if(SL.Sound) SL.Sound.mute(t0,dur); }catch(_){} }
+// ===== Ambiente: pájaros, viento y (en la costa) el mar =====
+// Sonidos generados (no hay archivos): suaves y en segundo plano mientras juegas en el range o el campo.
+const AMB={on:false, nodes:null, birdT:0};
+function noiseBuf(a,sec){ const n=Math.floor(a.sampleRate*sec), b=a.createBuffer(1,n,a.sampleRate), d=b.getChannelData(0); let last=0; for(let i=0;i<n;i++){ const w=Math.random()*2-1; last=0.97*last+0.03*w; d[i]=last*6; } return b; }
+function ambientStart(){ const a=audio(); if(!a || AMB.on || !S.ambient) return; try{
+  const src=a.createBufferSource(); src.buffer=noiseBuf(a,4); src.loop=true; const lp=a.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=380; const g=a.createGain(); g.gain.value=0;
+  src.connect(lp); lp.connect(g); g.connect(a.destination); src.start();
+  const sea=a.createBufferSource(); sea.buffer=noiseBuf(a,5); sea.loop=true; const sl=a.createBiquadFilter(); sl.type="lowpass"; sl.frequency.value=700; const sg=a.createGain(); sg.gain.value=0;
+  sea.connect(sl); sl.connect(sg); sg.connect(a.destination); sea.start();
+  AMB.nodes={src,g,sea,sg}; AMB.on=true; ambientTick(); }catch(_){} }
+function ambientStop(){ if(!AMB.on) return; try{ AMB.nodes.src.stop(); AMB.nodes.sea.stop(); }catch(_){} AMB.nodes=null; AMB.on=false; clearTimeout(AMB.t); }
+function chirp(){ const a=audio(); if(!a) return; const t0=a.currentTime, base=2600+Math.random()*1600, n=2+Math.floor(Math.random()*4);
+  for(let k=0;k<n;k++){ const o=a.createOscillator(), g=a.createGain(), ts=t0+k*(0.09+Math.random()*0.05); o.type="sine";
+    o.frequency.setValueAtTime(base*(0.9+Math.random()*0.2),ts); o.frequency.exponentialRampToValueAtTime(base*(1.25+Math.random()*0.3),ts+0.06);
+    g.gain.setValueAtTime(0.0001,ts); g.gain.exponentialRampToValueAtTime(0.022,ts+0.012); g.gain.exponentialRampToValueAtTime(0.0001,ts+0.07);
+    o.connect(g); g.connect(a.destination); o.start(ts); o.stop(ts+0.09); } if(SL.Sound) SL.Sound.mute(t0,n*0.15); }
+function ambientTick(){ if(!AMB.on) return; const a=audio(), N=AMB.nodes; if(!a||!N) return;
+  const play=(mode==="course"||mode==="range") && !document.hidden && S.ambient;
+  const w=mode==="course"&&course&&course.wind?course.wind[course.hole]:{s:2}, ws=w?w.s:2, coast=mode==="course" && CUR && CUR.scenery==="caribe";
+  const t=a.currentTime; N.g.gain.setTargetAtTime(play?0.006+Math.min(8,ws)*0.0035*(0.7+0.3*Math.sin(t*0.7)):0,t,0.8);
+  N.sg.gain.setTargetAtTime(play&&coast?0.012+0.01*Math.max(0,Math.sin(t*0.9)):0,t,1.2);
+  if(play && Math.random()<0.35) chirp();
+  AMB.t=setTimeout(ambientTick,1800+Math.random()*2600); }
+const sfx={ hit:c=>{ const wood=c==="driver"||c==="wood3"||c==="hybrid";
+    if(wood){ noise(0.05,2300,1.0,0.9); tone(1750,0.16,0.16); tone(2620,0.11,0.08); }          // driver: "ping" con un poco de metal
+    else if(isWedge(c)){ noise(0.035,3000,1.5,0.85); tone(210,0.05,0.12,"triangle"); }        // wedge: más suave
+    else { noise(0.04,3600,1.7,1.05); tone(190,0.06,0.16,"triangle"); tone(3100,0.05,0.05); } }, // hierro: seco y compacto
+  whoosh, land:()=>noise(0.12,320,0.8,0.7,"lowpass"), putt:()=>noise(0.05,1800,2,0.5), cup:()=>{ noise(0.08,900,3,0.6); setTimeout(()=>noise(0.06,1200,3,0.4),90); }, splash:()=>noise(0.45,700,0.5,0.6,"lowpass") };
 function playRhythm(){ const a=audio(); if(!a) return; const [B,D]=S.guideRatio.split("/").map(Number), t0=a.currentTime+0.5;
   beep(660,0.09,t0); beep(660,0.09,t0+B/30); beep(990,0.15,t0+(B+D)/30); }
 function say(txt){ if(!S.voice || !("speechSynthesis" in window)) return;
@@ -179,13 +214,16 @@ let shotSeq=0;
 
 // ================= Range =================
 function setupRange(){ if(!has3D) return; World.setScenery(null); World.setRange({um:S.dist==="yd"?0.9144:1}); World.setMarks(rangeMarks); World.setAim(rangeAim); World.address(0,0,yawTo({x:0,z:0},rangeAim),true); renderAim(); }
+// tu swing para el golfista 3D: largo de subida y final (la cámara mide el brazo; el sensor, el palo) y ritmo medido
+function swingOf(h){ const cam=h.source==="camera", k=cam?1:0.62, cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  return {B:cl((h.back||850)/1000,0.55,1.4), D:cl((h.down||290)/1000,0.2,0.45), top:cl(h.arcTop==null?150:h.arcTop*k,35,175), fin:cl(h.arcFin==null?165:h.arcFin*k,40,200)}; }
 function rangeShot(h){
   const dv=derive(h), sim=SL.simulateLocal(launch(h.club,dv.ms,h,"tee"),[0,0],null);
   if(aimMode) toggleAimView(false);
   const yaw=yawTo({x:0,z:0},rangeAim), pts=toWorld(sim.pts,0,0,yaw), seq=++shotSeq, fin=pts[pts.length-1], toT=Math.hypot(fin.x-rangeAim.x,fin.z-rangeAim.z);
-  sfx.hit(); setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
+  setHudMsg(null); $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
   camShot();
-  World.playShot({pts, landT:sim.landT, onLand:sfx.land, onEnd:()=>{
+  World.playShot({pts, landT:sim.landT, swing:swingOf(h), onDown:()=>sfx.whoosh(), onImpact:()=>sfx.hit(h.club), landKind:"grass", onLand:sfx.land, onEnd:()=>{
     $("skip").hidden=true; rangeMarks.push({x:+fin.x.toFixed(1),z:+fin.z.toFixed(1)}); rangeMarks=rangeMarks.slice(-40); store.set("sl3_rangeMarks",rangeMarks);
     if(!h.sim){ rangeProx.push(+toT.toFixed(1)); rangeProx=rangeProx.slice(-30); store.set("sl7_rangeProx",rangeProx);
       const td=Math.hypot(rangeAim.x,rangeAim.z); if(td>=40) addEntry("prox",{v:+toT.toFixed(1), t:+td.toFixed(0), club:h.club});
@@ -475,9 +513,11 @@ function courseShot(h){
   let endLie = !tree && (sim.landG==="water"||sim.landG==="ob") ? sim.landG : SL.lieAt(hole,fx,fz);
   if(endLie==="water" && !SL.waterAt(hole,wx,wz)){ wx=fx; wz=fz; }
   const line=pts.filter(p=>p.t<=landT).filter((p,i,a)=>i%4===0||i===a.length-1).map(p=>({x:+p.x.toFixed(1),y:+p.y.toFixed(1),z:+p.z.toFixed(1)}));
-  const seq=++shotSeq; sfx.hit(); setHudMsg(null); $("holeTip").hidden=true; $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
+  const seq=++shotSeq; setHudMsg(null); $("holeTip").hidden=true; $("card").hidden=true; $("skip").hidden=false; $("aimBar").hidden=true;
   camShot();
-  World.playShot({pts, landT, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
+  const wood=["driver","wood3"].includes(h.club), impact=fromLie==="bunker"?"sandShot":(fromLie==="fairway"||fromLie==="rough")&&!wood&&!chip?"divot":null;
+  const landKind=tree?null:endLie==="water"?"water":endLie==="bunker"?"sand":endLie==="ob"?null:"grass";
+  World.playShot({pts, landT, swing:swingOf(h), onDown:()=>sfx.whoosh(), onImpact:()=>sfx.hit(h.club), impact, landKind, onLand:()=>(endLie==="water"?sfx.splash():sfx.land()), onEnd:()=>{
     $("skip").hidden=true; showCard(card, Math.hypot(fx-tgt.x,fz-tgt.z));
     course.lines.push(line); World.setLines(course.lines);
     if(endLie==="water" || endLie==="ob"){
@@ -493,7 +533,7 @@ function courseShot(h){
       setTimeout(()=>{ if(seq===shotSeq && !World.busy()){ setHudMsg(null); setupHole(false); } },2800); return;
     }
     if(!h.sim && h.club==="driver") addEntry("drives",{v:+Math.hypot(fx-ox,fz-oz).toFixed(1), c:courseId});
-    course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; course.aim=null; drawMini();
+    course.strokes+=1; course.ball={x:fx,z:fz}; course.lie=endLie; course.aim=null; course.auto=null; drawMini();
     { const dd=distToPin(); logShot({d:fromD, lie:fromLie, to:dd<0.3?0:dd, toLie:dd<0.3?"green":endLie, n:course.strokes, club:h.club}); }
     if(Math.hypot(tgt.x-hole.pinX,tgt.z-hole.L)>1) setTimeout(()=>{ if(seq===shotSeq) say(`A ${sayDist(Math.hypot(fx-tgt.x,fz-tgt.z))} del objetivo.`); },2200);
     const d=distToPin();
@@ -983,7 +1023,8 @@ function buildChips(){ const row=$("clubRow"); row.innerHTML=Object.keys(CLUBS).
 function renderChips(){ renderShots(); renderQuick(); document.querySelectorAll("#clubRow .chip").forEach(x=>{ x.setAttribute("aria-pressed",String(x.dataset.club===club));
   const old=x.querySelector(".sug"); if(old) old.remove();
   if((mode==="course"||mode==="range") && suggested===x.dataset.club){ const s=document.createElement("span"); s.className="sug"; s.textContent="Sugerido"; x.appendChild(s); } });
-  const cur=document.querySelector('.chip[aria-pressed="true"]'); if(cur && cur.scrollIntoView) try{ cur.scrollIntoView({block:"nearest",inline:"center",behavior:"smooth"}); }catch(_){} 
+  // centra el palo elegido en su fila sin mover la página (antes la página saltaba hacia abajo en pleno vuelo de la bola)
+  const cur=document.querySelector('#clubRow .chip[aria-pressed="true"]'), row=$("clubRow"); if(cur && row) try{ row.scrollTo({left:cur.offsetLeft-(row.clientWidth-cur.offsetWidth)/2, behavior:"smooth"}); }catch(_){} 
   document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
 function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderWedges(); renderDrill(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
 
@@ -1201,7 +1242,7 @@ $("aimR").addEventListener("click",e=>{ e.stopPropagation(); nudgeAim(-1.5); });
 $("aimPin").addEventListener("click",e=>{ e.stopPropagation(); if(course){ course.aim=null; course.auto=routeAim(); saveCourse(); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),false); suggestClub(); renderAim(); drawMini(); } });
 
 // ================= Modos y controles =================
-function setClub(c,silent){ club=c; store.set("sl2_club",club); $("clubLab").textContent=CLUBS[club].name; if(!silent) renderAll(); else renderChips(); }
+function setClub(c,silent){ club=c; if(has3D) World.setGolfer({club:c}); store.set("sl2_club",club); $("clubLab").textContent=CLUBS[club].name; if(!silent) renderAll(); else renderChips(); }
 function setMode(m){
   mode=m; store.set("sl3_mode",mode); applyAlt();
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
@@ -1227,7 +1268,7 @@ $("playRhythm").addEventListener("click",playRhythm);
 const bindSel=(id,key,after)=>{ $(id).value=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.value; saveSettings(); dcache.clear(); renderAll(); after&&after(); }); };
 const bindChk=(id,key)=>{ $(id).checked=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.checked; saveSettings(); }); };
 function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear(); renderAll(); if(mode==="range") setupRange(); }
-bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
+bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); if(has3D) World.setGolfer({hand:S.hand}); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
 bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("camModel","camModel",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("sgBase","sgBase",()=>renderStats());
@@ -1236,7 +1277,7 @@ bindSel("bag","bag",()=>{ if(!inBag(club)) setClub("wedge",true); if(drill && !i
 $("wedgeAuto").addEventListener("click",()=>startDrill(null,null,true));
 bindSel("camSound","camSound",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camShutter","camShutter",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("alt","alt",()=>{ S.alt=+S.alt||0; saveSettings(); applyAlt(); fcache.clear(); dcache.clear(); renderAll(); });
-bindChk("voice","voice"); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
+bindChk("voice","voice"); bindChk("ambient","ambient"); $("ambient").addEventListener("change",()=>{ if(S.ambient) ambientStart(); else ambientStop(); }); bindChk("cont","cont"); bindChk("guide","guide"); bindChk("invert","invert");
 document.querySelectorAll("#distSeg button").forEach(b=>b.addEventListener("click",()=>setDist(b.dataset.d)));
 $("qcSave").addEventListener("click",()=>{ const v=parseFloat($("qcDist").value);
   S.alt=+$("qcAlt").value||0; $("alt").value=String(S.alt);
@@ -1304,7 +1345,9 @@ function drawSwingViz(){
 }
 
 // ================= Arranque =================
-has3D = World.init($("sim"));
+has3D = World.init($("sim")); if(has3D) World.setGolfer({hand:S.hand, club});
+// el audio solo puede arrancar después de que la persona toca la pantalla
+document.addEventListener("pointerdown",()=>{ if(S.ambient && !AMB.on) ambientStart(); },{passive:true});
 if(!has3D) msg("Tu navegador no pudo cargar la vista 3D. La medición del swing sí funciona.",true);
 buildChips(); buildShots(); applyAlt();
 const ex=SL.analyze(SL.synthKin({hz:100,peak:1700,face:1.5,path:-1}),club,{mode:S.hold,hand:S.hand}); if(!ex.error){ const {rawSamples,...h}=ex; h.example=true; h.sim=true; shown=h; }

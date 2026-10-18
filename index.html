@@ -166,7 +166,7 @@ svg.clk line{stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
 .camMsg.ready{color:#7dff9a}.camMsg.bad{color:#ffd0c8;font-size:clamp(1.1rem,4.6vw,1.5rem)}
 .replayBtn{position:absolute;right:10px;bottom:216px;z-index:3;appearance:none;border:0;border-radius:99px;padding:7px 12px;background:rgba(8,24,18,.8);color:#fff;font:600 .8rem var(--body);cursor:pointer}
 #aimInfo{white-space:normal;flex-basis:100%;background:rgba(8,24,18,.72);color:#eef4ef;border-radius:10px;padding:4px 9px;font:600 .74rem/1.3 var(--body);width:max-content;max-width:100%}
-.aimBar{position:absolute;left:10px;bottom:84px;z-index:3;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 100px)}
+.aimBar{position:absolute;left:10px;bottom:10px;z-index:3;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:calc(100% - 100px)}
 .aimBar button{appearance:none;border:0;border-radius:99px;min-width:38px;height:38px;padding:0 12px;background:rgba(8,24,18,.8);color:#fff;font:700 .9rem var(--body);cursor:pointer}
 .aimBar button.go2{background:var(--accent);color:var(--accent-ink)}
 .aimBar span{background:rgba(8,24,18,.6);color:#fff;border-radius:99px;padding:5px 10px;font:600 .78rem var(--body);white-space:nowrap}
@@ -538,6 +538,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <select id="camShutter"><option value="auto">Rápido si hay luz (menos imagen corrida)</option><option value="off">Automático del teléfono</option></select>
       <label for="voice">Leer el resultado en voz alta</label><input type="checkbox" id="voice">
       <label for="cont">Medir swing tras swing sin tocar la pantalla</label><input type="checkbox" id="cont">
+      <label for="ambient">Sonido ambiente (pájaros, viento y mar)</label><input type="checkbox" id="ambient">
     </div>
   </details>
 
@@ -614,13 +615,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.16"></script>
-<script src="js/courses.js?v=0.16"></script>
-<script src="js/world3d.js?v=0.16"></script>
-<script src="js/sound.js?v=0.16"></script>
-<script src="js/camera.js?v=0.16"></script>
-<script src="js/online-config.js?v=0.16"></script>
-<script src="js/online.js?v=0.16"></script>
-<script src="js/app.js?v=0.16"></script>
+<script src="js/engine.js?v=0.17"></script>
+<script src="js/courses.js?v=0.17"></script>
+<script src="js/world3d.js?v=0.17"></script>
+<script src="js/sound.js?v=0.17"></script>
+<script src="js/camera.js?v=0.17"></script>
+<script src="js/online-config.js?v=0.17"></script>
+<script src="js/online.js?v=0.17"></script>
+<script src="js/app.js?v=0.17"></script>
 </body>
 </html>
