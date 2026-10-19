@@ -321,7 +321,8 @@ async function loadModel(kind){
 }
 Cam.setView=v=>{ opts.view=v; VIEW=v||"front"; Cam.addrLines=null; };
 Cam.supported=()=>!!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-Cam.setMock=fn=>{ mock=fn; };   // pruebas: función (t)=>cuadro
+Cam.setMock=fn=>{ mock=fn; };
+Cam.setMockStream=s=>{ stream=s; };   // pruebas: un video de lienzo en lugar de la cámara   // pruebas: función (t)=>cuadro
 Cam.start=async function(o){
   opts=o||{}; cb=opts; VIEW=opts.view||"front"; video=document.getElementById("camVideo"); canvas=document.getElementById("camCanvas"); ctx=canvas.getContext("2d");
   Cam.loading=true; status("Cargando el detector de movimiento… (solo tarda la primera vez)","wait");
@@ -384,10 +385,26 @@ function onMotion(e){ const g=e.accelerationIncludingGravity; if(!g || g.x==null
   const ang=(screen.orientation && screen.orientation.angle) ?? (window.orientation||0), land=Math.abs(ang)%180===90;
   const a=land?g.y:g.x, b=land?g.x:g.y; if(Math.abs(g.z)>7 || Math.abs(b)<5){ Cam.tilt=null; return; }
   const t=Math.atan2(a,Math.abs(b))/DEG; Cam.tilt = Cam.tilt==null ? t : Cam.tilt*0.85+t*0.15; }
-function stopStream(){ window.removeEventListener("devicemotion",onMotion); Cam.tilt=null; if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
+// ---------------- video de cada swing ----------------
+// Se graba desde que quedas quieto en el address hasta el final del swing (con el sonido del golpe si el micrófono está activo).
+const Rec={cur:null};
+function recMime(){ if(!window.MediaRecorder) return null; for(const m of ["video/mp4;codecs=avc1","video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm","video/mp4"]) try{ if(MediaRecorder.isTypeSupported(m)) return m; }catch(e){} return ""; }
+Cam.canRecord=()=>recMime()!==null;
+function recStart(){ if(!stream || opts.record===false || Rec.cur || Cam.paused) return; const mime=recMime(); if(mime===null) return;
+  try{ const r=new MediaRecorder(stream, Object.assign({videoBitsPerSecond:2500000}, mime?{mimeType:mime}:{})), cur={r, chunks:[], mime:r.mimeType||mime||"video/webm", start:0, t0:performance.now()};
+    r.ondataavailable=e=>{ if(e.data && e.data.size) cur.chunks.push(e.data); }; r.onstart=()=>{ cur.start=performance.now(); };
+    r.start(); Rec.cur=cur; }catch(e){ Rec.cur=null; } }
+// termina una grabación ya separada (así pausar la cámara para ver el tiro no la borra)
+function recFinish(cur, keep){ if(!cur) return Promise.resolve(null);
+  return new Promise(res=>{ let done=false; const fin=v=>{ if(!done){ done=true; res(v); } };
+    cur.r.onstop=()=>fin(keep&&cur.chunks.length?{blob:new Blob(cur.chunks,{type:cur.mime.split(";")[0]}), mime:cur.mime, start:cur.start||cur.t0}:null); setTimeout(()=>fin(null),3000);
+    try{ cur.r.stop(); }catch(e){ fin(null); } }); }
+function recStop(keep){ const cur=Rec.cur; Rec.cur=null; return recFinish(cur, keep); }
+Cam.lastClip=null;
+function stopStream(){ recStop(false); window.removeEventListener("devicemotion",onMotion); Cam.tilt=null; if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
 Cam.stop=function(){ Cam.on=false; cancelAnimationFrame(raf); raf=0; if(vfc && video && video.cancelVideoFrameCallback) try{ video.cancelVideoFrameCallback(vfc); }catch(_){} vfc=0; stopStream(); st="idle"; lockUntil=0; status(null); if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height); };
 // pausa la lectura (para apuntar o mientras vuela la bola); al seguir, da unos segundos para ponerse en posición
-Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ st="seek"; stillSince=null; readyHip=null; return; }
+Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ recStop(false); st="seek"; stillSince=null; readyHip=null; return; }
   st="seek"; stillSince=null; readyHip=null; buf=[]; coolUntil=performance.now()+grace; Cam.graceMsg=msg; if(msg) status(msg+" "+Math.ceil(grace/1000),"wait"); };
 
 let lockUntil=0;
@@ -474,13 +491,17 @@ function step(f){
   if(st==="seek"||st==="ready"){
     trail=[];
     if(st==="seek"){ const hn=v<0.6?setupHint(f):null; status(hn||"Quieto en address…", hn?"bad":"wait"); }
-    if(v<0.3){ if(stillSince==null) stillSince=now; else if(st==="seek" && now-stillSince>=450){ st="ready"; readyHip=hip; status("¡Listo! Haz tu swing","ready"); cb.onReady&&cb.onReady(); } }
+    if(v<0.3){ if(stillSince==null) stillSince=now; else if(st==="seek" && now-stillSince>=450){ st="ready"; readyHip=hip; status("¡Listo! Haz tu swing","ready"); recStart(); cb.onReady&&cb.onReady(); } }
+    // si esperas mucho en el address, el video vuelve a empezar (para que no quede largo)
+    if(st==="ready" && Rec.cur && performance.now()-Rec.cur.t0>9000){ recStop(false).then(()=>{ if(st==="ready") recStart(); }); }
     else if(v>0.6) stillSince=null;
     // si caminas (la cadera se va del sitio) vuelve a esperar el address
-    if(st==="ready" && readyHip && dist(hip,readyHip)>0.4*torso && v<2.2){ st="seek"; stillSince=null; readyHip=null; }
+    if(st==="ready" && readyHip && dist(hip,readyHip)>0.4*torso && v<2.2){ st="seek"; stillSince=null; readyHip=null; recStop(false); }
     if(st==="ready" && v>2.2){ st="capture"; capStart=now; quietSince=null; status("Leyendo swing…","wait"); }
     // ¿de frente o de perfil? si no coincide con lo elegido, avisa a la app (cambia sola de vista)
-    if(v<0.5){ const r=dist(f.p.ls,f.p.rs)/(dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1), guess=r<0.38?"behind":r>0.6?"front":null;
+    // solo en una postura de address (manos abajo): sosteniendo el final los hombros se ven angostos y parecería "de perfil"
+    const handsLow=mid(f.p.lw,f.p.rw)[1]>mid(f.p.ls,f.p.rs)[1]+0.55*torso;
+    if(v<0.5 && handsLow){ const r=dist(f.p.ls,f.p.rs)/(dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1), guess=r<0.38?"behind":r>0.6?"front":null;
       viewVotes=guess && guess!==(opts.view||"front") ? viewVotes+1 : 0;
       if(viewVotes>=45){ viewVotes=0; cb.onView && cb.onView(guess); } }
     if(st==="ready" && (opts.view==="behind")) Cam.addrLines={hand:mid(f.p.lw,f.p.rw), sh:mid(f.p.ls,f.p.rs), hip:mid(f.p.lh,f.p.rh)};
@@ -491,6 +512,7 @@ function step(f){
     trail.push({t:now, p:hand, d:down || (trail.length && trail[trail.length-1].d)}); while(trail.length && now-trail[0].t>1600) trail.shift();
     if(v<0.35){ if(quietSince==null) quietSince=now; } else quietSince=null;
     if((quietSince!=null && now-quietSince>=450 && now-capStart>600) || now-capStart>3800){
+      { const cur=Rec.cur; Rec.cur=null; Cam.lastClip=cur ? new Promise(r=>setTimeout(()=>recFinish(cur,true).then(r),350)) : null; }
       const frames=buf.slice(); keepThumbs(frames); st="seek"; stillSince=null; readyHip=null; coolUntil=now+1200; Cam.graceMsg=null; trail=[];
       cb.onSwing && cb.onSwing(frames);
     }

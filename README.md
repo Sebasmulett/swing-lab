@@ -21,6 +21,7 @@ Los nombres de los campos se usan solo como referencia; la app no está afiliada
 
 - **Matriz de wedges** (sistema del reloj): carry de cada wedge con swings de 7:30, 9:00, 10:30 y completo, con entrenamiento guiado.
 - **Strokes Gained** por categoría (salida, al green, alrededor del green, putts) contra un hándicap 15 o el PGA Tour, más calles, greens en regulación, up & down y penalidades.
+- **Práctica con video y coach**: cada swing con la cámara queda en video (solo en el teléfono) con sus líneas; al final de la práctica, las fallas que más se repiten y ejercicios con una meta medible.
 - **Estrategia según tu dispersión**: la elipse de tus tiros sobre el hoyo y el punto de apuntar con menos golpes esperados.
 
 ## Ranking en línea
