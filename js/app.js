@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.18";
+const VERSION="0.19";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -201,7 +201,8 @@ function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="
   const st=shotFor(club); $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`+(st!=="normal"?` · ${SL.SHOTS[st].name}`:"");
   $("aimBar").style.bottom=$("card").hidden?"10px":"84px";   // si está la tarjeta del tiro, los controles van encima de ella
   $("aimInfo").innerHTML=yardage(); $("aimInfo").hidden=!$("aimInfo").innerHTML; { const ub=$("useStrat"); if(ub) ub.onclick=e=>{ e.stopPropagation(); useStrategy(); }; } $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
-  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || World.flying() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig(); void o; void p; }
+  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || World.flying() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig();
+  $("wdOpen").hidden=!has3D || !SL.Wardrobe || mode==="data" || mode==="rank" || World.busy() || World.flying() || aimMode || !$("card").hidden || camIsBig(); void o; void p; }
 function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
   setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
 function toggleAimView(on){ aimMode=on; const o=aimOrigin(), p=aimPoint();
@@ -1250,13 +1251,21 @@ function camLayer(on,noResume){
   renderAim(); }
 // al pegar: la cámara se queda pequeña para ver el vuelo y deja de leer hasta el siguiente address
 function camShot(){ if(camState!=="on") return; SL.Cam.pause(true); SL.Cam.flash("Mira tu tiro…","wait",1e7); camBig=false; camLayer(true,true); }
+let notReadySince=0, diagTipped=false;
 function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.className="camMsg "+(kind||""); m.hidden=!text;
+  // 15 s sin quedar listo: sugiere el diagnóstico (una vez por sesión)
+  if(kind==="ready" || SL.Cam.paused) notReadySince=0; else if(!notReadySince) notReadySince=performance.now();
+  else if(!diagTipped && !SL.Cam.showDiag && performance.now()-notReadySince>15000){ diagTipped=true; SL.Cam.flash("¿No te capta? Toca 🔍 para ver qué le falta a la cámara","wait",5000); }
   $("camBox").classList.toggle("ready",kind==="ready");
   const st=$("status"); st.className="pill"+(kind==="ready"?" ready":kind==="bad"?" wait":" on"); if(text) st.textContent=kind==="ready"?"Listo":kind==="bad"?"Sin cuerpo":SL.Cam.paused?"En pausa":"Cámara"; }
 function showGuide(){ $("guideSide").textContent=S.hand==="L"?"a tu derecha (eres zurdo)":"a tu izquierda (eres diestro)"; $("camGuide").hidden=false; }
 $("guideOk").addEventListener("click",()=>{ $("camGuide").hidden=true; store.set("sl11_guide",true); });
 $("guideShow").addEventListener("click",showGuide);
 $("camBox").addEventListener("click",e=>{ e.stopPropagation(); if(SL.Cam.replaying() || mode==="data" || mode==="rank" || !has3D) return; camBig=!camBig; camLayer(true); });
+// diagnóstico: qué ve la cámara (visibilidad, quietud, qué falta) para entender por qué no capta
+function setDiag(on){ SL.Cam.showDiag=!!on; $("camDiag").setAttribute("aria-pressed",String(!!on)); store.set("sl19_diag",!!on); if(on && !camBig){ camBig=true; camLayer(true); } }
+$("camDiag").addEventListener("click",e=>{ e.stopPropagation(); setDiag(!SL.Cam.showDiag); });
+setDiag(store.get("sl19_diag",false));
 $("camSize").addEventListener("click",e=>{ e.stopPropagation(); camBig=!camBig; camLayer(true); });
 $("camPause").addEventListener("click",e=>{ e.stopPropagation(); camHold=!camHold;
   if(camHold){ SL.Cam.pause(true); SL.Cam.flash("En pausa · toca ▶ para seguir","wait",600000); }
@@ -1264,6 +1273,7 @@ $("camPause").addEventListener("click",e=>{ e.stopPropagation(); camHold=!camHol
   camLayer(true); });
 // un intento que no se pudo medir: aviso corto en la cámara, sin dejar la pantalla trabada
 function camError(res){
+  SL.Cam.diag.last=res.error; SL.Cam.diag.lastOk=false;
   const soft=["slow","short","noback"].includes(res.code);
   SL.Cam.flash(soft?"Eso no pareció un swing completo":res.error, "bad", soft?2200:4000);
   if(!soft){ beep(220,0.2); say(res.code==="noimp"?"No vi el impacto. Termina el swing dentro de la imagen.":"No pude medir ese swing."); }
@@ -1280,9 +1290,15 @@ async function camStart(){
   const ok=await SL.Cam.start({facing:S.camFacing, model:S.camModel, view:S.camView, sound:S.camSound==="on", audioCtx:audio(), shutter:S.camShutter, record:S.saveVideo!==false && !!SL.VStore && SL.VStore.ok(), onStatus:camStatus, onReady:()=>{ if(S.guide) playRhythm(); else beep(880,0.08); },
     onView:v=>{ if(S.camView===v) return; S.camView=v; saveSettings(); $("camView").value=v; SL.Cam.setView(v); camLayer(true,true);
       SL.Cam.flash(v==="behind"?"Te veo de perfil: uso la vista desde atrás":"Te veo de frente: uso la vista de frente","wait",2600); say(v==="behind"?"Te veo de perfil. Uso la vista desde atrás.":"Te veo de frente."); },
-    onSwing:frames=>{ const clipP=SL.Cam.lastClip; SL.Cam.lastClip=null; if(World.busy() || aimMode) return; const po={grip:S.camGrip, view:S.camView, shutter:SL.Cam.shutter};
+    onSwing:frames=>{ const clipP=SL.Cam.lastClip; SL.Cam.lastClip=null;
+      if(World.busy() || aimMode){ SL.Cam.flash(aimMode?"Estás apuntando: toca 🎯 Apuntar para volver a la cámara":"Espera a que caiga la bola para el siguiente swing","wait",2400); return; } const po={grip:S.camGrip, view:S.camView, shutter:SL.Cam.shutter};
       let res=SL.analyzePose(frames, club, po);
+      // ¿la vista elegida no era la real? (p. ej. "de frente" con el teléfono detrás): se prueba con la que muestran los cuadros
+      if(res.error && SL.guessView){ const g=SL.guessView(frames); if(g && g!==S.camView){ const r2=SL.analyzePose(frames, club, Object.assign({},po,{view:g}));
+        if(!r2.error){ res=r2; po.view=g; S.camView=g; saveSettings(); $("camView").value=g; SL.Cam.setView(g); camLayer(true,true);
+          SL.Cam.flash(g==="behind"?"Te vi de perfil: cambié a la vista desde atrás":"Te vi de frente: cambié a la vista de frente","wait",2600); } } }
       if(res.error){ camError(res); return; }
+      SL.Cam.diag.last=`${res.view==="behind"?"atrás":"frente"} · manos ${Math.round((res.hand||0)*2.237)} mph · calidad ${res.camQ?res.camQ.level:"–"}`; SL.Cam.diag.lastOk=true;
       // segunda pasada con el impacto que oyó el micrófono (más exacto que el cuadro de video)
       if(SL.Sound && SL.Sound.on){ const hit=SL.Sound.impactFor(res);
         if(hit){ if(hit.t!=null){ const r2=SL.analyzePose(frames, club, Object.assign({tImpact:hit.t, tImpactSrc:hit.src},po)); if(!r2.error) res=r2; } res.heard=true; } }
@@ -1377,8 +1393,8 @@ $("playRhythm").addEventListener("click",playRhythm);
 const bindSel=(id,key,after)=>{ $(id).value=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.value; saveSettings(); dcache.clear(); renderAll(); after&&after(); }); };
 const bindChk=(id,key)=>{ $(id).checked=S[key]; $(id).addEventListener("change",e=>{ S[key]=e.target.checked; saveSettings(); }); };
 function setDist(d){ S.dist=d; saveSettings(); $("dist").value=d; dcache.clear(); renderAll(); if(mode==="range") setupRange(); }
-bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); if(has3D) World.setGolfer({hand:S.hand}); }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
-bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(camState==="on"){ camStop(); camStart(); } });
+bindSel("units","units"); bindSel("dist","dist",()=>{ if(mode==="range") setupRange(); }); bindSel("hand","hand",()=>{ if(camState==="on") camLayer(true,true); if(has3D){ World.setGolfer({hand:S.hand}); applyOutfit(); } }); bindSel("guideRatio","guideRatio"); bindSel("hold","hold");
+bindSel("camFacing","camFacing",()=>{ if(camState==="on"){ camStop(); camStart(); } }); bindSel("camGrip","camGrip"); bindSel("camView","camView",()=>{ if(S.camView==="behind" && !store.get("sl19_guideB",false)){ store.set("sl19_guideB",true); showGuide(); } if(camState==="on"){ camStop(); camStart(); } });
 bindSel("camModel","camModel",()=>{ if(camState==="on"){ camStop(); camStart(); } });
 bindSel("sgBase","sgBase",()=>renderStats());
 document.querySelectorAll("#statScope button").forEach(b=>b.addEventListener("click",()=>{ statScope=b.dataset.s; document.querySelectorAll("#statScope button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); renderStats(); }));
@@ -1468,8 +1484,57 @@ function drawSwingViz(){
   c.textAlign="center"; c.font="600 12px "+css("--body"); c.fillText(shapeName(h)||"",ox,H-6);
 }
 
+// ================= Vestuario (maqueta para marcas aliadas) =================
+let outfit=SL.Wardrobe?SL.Wardrobe.normalize(store.get("sl19_outfit",null)):null, wdTab="kits", wdCamWasOn=false;
+function applyOutfit(){ if(has3D && outfit) World.setOutfit(outfit); }
+function setOutfit(ch){ Object.assign(outfit,ch); store.set("sl19_outfit",outfit); applyOutfit(); renderWardrobe(); }
+// miniatura de un conjunto: camiseta, pantalón, gorra y el parche de su marca
+function kitThumb(cv,o){ const W=SL.Wardrobe, x=cv.getContext("2d"), w=cv.width, h=cv.height, hx=W.hex; x.clearRect(0,0,w,h);
+  x.fillStyle="#9cc9e6"; x.fillRect(0,0,w,h); x.fillStyle="#7db353"; x.fillRect(0,h*0.78,w,h*0.22);
+  const cx=w*0.4; x.fillStyle=hx(o.skin||W.DEF.skin); x.beginPath(); x.arc(cx,h*0.2,h*0.085,0,7); x.fill();
+  x.fillStyle=hx(o.cap); x.beginPath(); x.arc(cx,h*0.18,h*0.09,Math.PI,0); x.fill(); x.fillRect(cx,h*0.165,h*0.13,h*0.03);
+  x.fillStyle=hx(o.shirt); x.beginPath(); x.roundRect?x.roundRect(cx-w*0.15,h*0.3,w*0.3,h*0.27,6):x.rect(cx-w*0.15,h*0.3,w*0.3,h*0.27); x.fill();
+  x.fillStyle=hx(o.pants); x.fillRect(cx-w*0.12,h*0.56,w*0.1,h*0.27); x.fillRect(cx+w*0.02,h*0.56,w*0.1,h*0.27);
+  x.fillStyle=hx(o.shoe); x.fillRect(cx-w*0.14,h*0.82,w*0.13,h*0.045); x.fillRect(cx+w*0.01,h*0.82,w*0.13,h*0.045);
+  x.fillStyle=hx(o.bag); x.beginPath(); x.roundRect?x.roundRect(w*0.72,h*0.36,w*0.14,h*0.46,5):x.rect(w*0.72,h*0.36,w*0.14,h*0.46); x.fill();
+  if(o.chestLogo && o.chestLogo!=="none"){ const c=document.createElement("canvas"); c.width=128; c.height=64; W.drawLogo(c.getContext("2d"),128,64,o.chestLogo); x.drawImage(c,cx-w*0.02,h*0.34,w*0.13,w*0.065); }
+  if(o.bagLogo && o.bagLogo!=="none"){ const c=document.createElement("canvas"); c.width=128; c.height=64; W.drawLogo(c.getContext("2d"),128,64,o.bagLogo); x.drawImage(c,w*0.69,h*0.5,w*0.2,w*0.1); } }
+function renderWardrobe(){ const W=SL.Wardrobe; if(!W || $("wardrobe").hidden) return;
+  document.querySelectorAll("#wdTabs button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.t===wdTab)));
+  $("wdKitsBox").hidden=wdTab!=="kits"; $("wdRopaBox").hidden=wdTab!=="ropa"; $("wdMarcasBox").hidden=wdTab!=="marcas";
+  if(wdTab==="kits"){ const box=$("wdKits"); box.innerHTML="";
+    for(const k of W.KITS){ const b=document.createElement("button"); b.className="kit"+(k.soon?" soon":""); b.type="button";
+      if(k.soon){ b.innerHTML=`<div style="aspect-ratio:1/1;display:grid;place-items:center;font-size:1.8rem;border-radius:8px;background:var(--bg)">🔒</div><b>${k.n}</b><small>Pronto: colecciones de marcas aliadas</small>`; b.disabled=true; }
+      else { const cv=document.createElement("canvas"); cv.width=200; cv.height=200; kitThumb(cv,Object.assign({},W.DEF,{skin:outfit.skin},k.o)); b.appendChild(cv);
+        b.insertAdjacentHTML("beforeend",`<b>${k.n}</b><small>${k.partner?"Marca aliada · demo":"Conjunto"}</small>`+(k.partner?`<span class="rib">Aliada</span>`:""));
+        b.setAttribute("aria-pressed",String(outfit.kit===k.id)); b.onclick=()=>setOutfit(Object.assign({kit:k.id},k.o)); }
+      box.appendChild(b); } }
+  if(wdTab==="ropa"){ const box=$("wdParts"); box.innerHTML="";
+    for(const [k,label] of W.PARTS){ const row=document.createElement("div"); row.className="wdPart"; row.innerHTML=`<span>${label}</span>`; const sw=document.createElement("div"); sw.className="wdSw";
+      for(const c of W.PAL[k]){ const b=document.createElement("button"); b.type="button"; b.style.background=W.hex(c.h); b.title=c.n; b.setAttribute("aria-label",`${label}: ${c.n}`); b.setAttribute("aria-pressed",String(outfit[k]===c.h));
+        b.onclick=()=>setOutfit({[k]:c.h, kit:"custom"}); sw.appendChild(b); }
+      row.appendChild(sw); box.appendChild(row); } }
+  if(wdTab==="marcas"){ const box=$("wdSlots"); box.innerHTML="";
+    for(const [k,label] of W.SLOTS){ const row=document.createElement("div"); row.className="wdPart"; row.innerHTML=`<span>Espacio: ${label}</span>`; const list=document.createElement("div"); list.className="wdBrands";
+      for(const br of W.BRANDS){ const b=document.createElement("button"); b.type="button"; b.className="wdBrand"; b.setAttribute("aria-pressed",String(outfit[k]===br.id));
+        if(br.id==="none") b.innerHTML=`<div class="no">∅</div>`; else { const cv=document.createElement("canvas"); cv.width=144; cv.height=72; W.drawLogo(cv.getContext("2d"),144,72,br.id); b.appendChild(cv); }
+        b.insertAdjacentHTML("beforeend",`<span>${br.n}</span>`); b.onclick=()=>setOutfit({[k]:br.id, kit:"custom"}); list.appendChild(b); }
+      row.appendChild(list); box.appendChild(row); } } }
+function openWardrobe(){ if(!has3D || !SL.Wardrobe){ msg("El vestuario necesita la vista 3D.",true); return; }
+  if(World.busy()) World.skip();
+  wdCamWasOn=camState==="on" && !SL.Cam.paused; if(wdCamWasOn) SL.Cam.pause(true);
+  if(aimMode) toggleAimView(false);
+  window.scrollTo(0,0); $("view").classList.add("studio"); $("wardrobe").hidden=false; World.resize(); World.studio(true); renderWardrobe(); }
+function closeWardrobe(){ $("wardrobe").hidden=true; $("view").classList.remove("studio"); World.studio(false); World.resize();
+  if(wdCamWasOn && !camHold){ SL.Cam.pause(false,1500,"Ponte en posición"); } wdCamWasOn=false; renderAim(); }
+$("wdOpen").addEventListener("click",e=>{ e.stopPropagation(); openWardrobe(); });
+$("wdOpen2").addEventListener("click",()=>{ document.querySelector(".mode[data-mode=range]")?.click(); setTimeout(openWardrobe,300); });
+$("wdClose").addEventListener("click",closeWardrobe);
+$("wdReset").addEventListener("click",()=>{ const W=SL.Wardrobe; setOutfit(Object.assign({},W.DEF)); });
+document.querySelectorAll("#wdTabs button").forEach(b=>b.addEventListener("click",()=>{ wdTab=b.dataset.t; renderWardrobe(); }));
+
 // ================= Arranque =================
-has3D = World.init($("sim")); if(has3D) World.setGolfer({hand:S.hand, club});
+has3D = World.init($("sim")); if(has3D){ World.setGolfer({hand:S.hand, club}); applyOutfit(); }
 // el audio solo puede arrancar después de que la persona toca la pantalla
 document.addEventListener("pointerdown",()=>{ if(S.ambient && !AMB.on) ambientStart(); },{passive:true});
 if(!has3D) msg("Tu navegador no pudo cargar la vista 3D. La medición del swing sí funciona.",true);

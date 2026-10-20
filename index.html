@@ -177,8 +177,39 @@ svg.clk line{stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
 .camBox.pip .camTgt{top:auto;bottom:44px}
 .camBox.big .camTgt{top:76px;left:12px;font-size:.9rem;padding:5px 12px}
 .guideSvg{width:100%;height:auto;color:var(--ink);--fairwayG:#7db353}
+/* vestuario: el campo arriba como vista previa (cámara de estudio) y la hoja de opciones abajo */
+.wdBtn{position:absolute;right:10px;bottom:10px;z-index:3;width:44px;height:44px;border-radius:50%;border:0;background:rgba(8,24,18,.72);font-size:1.25rem;line-height:1;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.wdPreview{display:none}
+.view.studio{position:fixed;left:0;right:0;top:0;height:42vh;border-radius:0;z-index:60}
+.view.studio>*:not(#sim):not(.wdPreview){display:none!important}
+.view.studio .wdPreview{display:block;position:absolute;left:10px;top:10px;font:700 .72rem var(--body);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:rgba(8,24,18,.6);padding:4px 9px;border-radius:99px}
+.wardrobe{position:fixed;left:0;right:0;top:42vh;bottom:0;z-index:61;background:var(--surface);color:var(--ink);border-radius:18px 18px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.22);display:flex;flex-direction:column}
+.wdHead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+.wdHead .seg{order:3;width:100%;display:flex}.wdHead .seg button{flex:1;padding:7px 6px}
+.wdHead h2{margin:0;font-size:1.1rem;flex:1}
+.wdBody{overflow:auto;padding:10px 14px 18px;display:flex;flex-direction:column;gap:10px}
+.wdKits{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px}
+.kit{flex:0 0 auto;width:118px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:8px;text-align:left;color:var(--ink);cursor:pointer;position:relative}
+.kit[aria-pressed="true"]{outline:2.5px solid var(--accent)}
+.kit canvas{width:100%;height:auto;display:block;border-radius:8px}
+.kit b{display:block;font-size:.86rem;margin-top:5px}.kit small{display:block;color:var(--muted);font-size:.7rem}
+.kit .rib{position:absolute;top:6px;right:6px;font:800 .58rem var(--body);text-transform:uppercase;letter-spacing:.04em;background:var(--accent);color:var(--accent-ink);padding:2px 6px;border-radius:99px}
+.kit.soon{opacity:.8;cursor:default;border-style:dashed}
+.wdPart{display:flex;flex-direction:column;gap:5px}
+.wdPart>span{font-size:.8rem;color:var(--muted);font-weight:600}
+.wdSw{display:flex;gap:8px;flex-wrap:wrap}
+.wdSw button{width:34px;height:34px;border-radius:50%;border:2px solid rgba(0,0,0,.15);cursor:pointer;padding:0}
+.wdSw button[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:2px}
+.wdBrands{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px}
+.wdBrand{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:6px;cursor:pointer;color:var(--ink);font-size:.7rem;min-width:84px}
+.wdBrand[aria-pressed="true"]{outline:2.5px solid var(--accent)}
+.wdBrand canvas{width:72px;height:36px}
+.wdBrand .no{width:72px;height:36px;display:grid;place-items:center;color:var(--muted);font-size:1.1rem;border:1px dashed var(--line);border-radius:8px}
+.wdNote{border-left:3px solid var(--accent);padding-left:10px}
+.dtlSvg{max-width:300px;display:block;margin:8px auto 0}
 .guideList{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:.92rem;line-height:1.4}
 .camBtns{position:absolute;right:4px;top:4px;display:flex;gap:4px;z-index:3}
+.camBtns button[aria-pressed="true"]{background:var(--accent);color:#08180f}
 .camBtns button{appearance:none;width:30px;height:30px;border-radius:50%;border:0;background:rgba(8,24,18,.78);color:#fff;font-size:.85rem;line-height:1;cursor:pointer;padding:0}
 .camBox.big .camBtns{top:auto;bottom:12px;right:12px;gap:8px}
 .camBox.big .camBtns button{width:44px;height:44px;font-size:1.1rem}
@@ -337,11 +368,13 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <div class="celebrate" id="celebrate" hidden aria-live="polite"></div>
     <span class="skip" id="skip" hidden>Toca para saltar</span>
     <canvas id="mini" hidden></canvas>
+    <button class="wdBtn" id="wdOpen" hidden aria-label="Vestuario del golfista">👕</button>
+    <span class="wdPreview" aria-hidden="true">Vista previa</span>
     <div class="camBox pip" id="camBox" hidden>
       <video id="camVideo" playsinline muted></video>
       <canvas id="camCanvas"></canvas>
       <div class="camMsg" id="camMsg" hidden></div>
-      <div class="camBtns"><button id="camPause" aria-label="Pausar la lectura">⏸</button><button id="camSize" aria-label="Agrandar la cámara">⤢</button></div>
+      <div class="camBtns"><button id="camDiag" aria-label="Ver qué ve la cámara" aria-pressed="false">🔍</button><button id="camPause" aria-label="Pausar la lectura">⏸</button><button id="camSize" aria-label="Agrandar la cámara">⤢</button></div>
       <div class="camTgt" id="camTgt" aria-hidden="true"></div>
     </div>
     <button class="replayBtn" id="replayBtn" hidden>▶ Repetición</button>
@@ -586,6 +619,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <label for="cont">Medir swing tras swing sin tocar la pantalla</label><input type="checkbox" id="cont">
       <label for="ambient">Sonido ambiente (pájaros, viento y mar)</label><input type="checkbox" id="ambient">
       <label for="saveVideo">Guardar el video de cada swing con la cámara</label><input type="checkbox" id="saveVideo">
+      <span class="lbl">Ropa y marcas del golfista</span><button class="ghost" id="wdOpen2" type="button">👕 Vestuario</button>
     </div>
   </details>
 
@@ -609,6 +643,16 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="wardrobe" id="wardrobe" hidden role="dialog" aria-modal="true" aria-labelledby="wdTitle">
+  <div class="wdHead"><h2 id="wdTitle">Vestuario</h2><div class="seg" id="wdTabs"><button data-t="kits" aria-pressed="true">Conjuntos</button><button data-t="ropa" aria-pressed="false">Ropa</button><button data-t="marcas" aria-pressed="false">Marcas</button></div><button class="ghost primary" id="wdClose">Listo</button></div>
+  <div class="wdBody">
+    <div id="wdKitsBox"><div class="wdKits" id="wdKits"></div><p class="note">Toca un conjunto para ponérselo. Los de <b>marca aliada</b> muestran cómo se vería un kit oficial: ropa, gorra y bolsa con la marca.</p></div>
+    <div id="wdRopaBox" hidden><div id="wdParts"></div></div>
+    <div id="wdMarcasBox" hidden><div id="wdSlots"></div>
+      <p class="note wdNote"><b>Maqueta para alianzas.</b> Las marcas que ves son inventadas. La gorra, el pecho y la bolsa son los espacios que se ofrecerían a marcas de golf aliadas, que podrían traer sus colecciones (y premios por practicar).</p></div>
+    <div class="row"><button class="ghost" id="wdReset">Volver al clásico</button></div>
+  </div>
+</div>
 <div class="intro vidModal" id="vidModal" hidden role="dialog" aria-modal="true" aria-label="Revisión del swing en video">
   <div class="box">
     <div class="rvHead"><b>Tu swing en video</b><button class="ghost" id="rvClose" aria-label="Cerrar">✕</button></div>
@@ -660,7 +704,23 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <ul class="guideList">
       <li><b>De frente</b> (lo recomendado): apoya el teléfono a 2 o 3 metros, frente a tu pecho, a la altura de la cintura y bien quieto. El objetivo queda a un lado: <span id="guideSide">a tu izquierda si eres diestro</span>.</li>
       <li>Que se vea <b>todo tu cuerpo</b>, de la cabeza a los pies, con buena luz de frente.</li>
-      <li><b>Desde atrás</b>: el teléfono unos 3 metros detrás de ti, sobre la línea de tiro, a la altura de tus manos y mirando hacia el objetivo, con todo tu cuerpo en la imagen. Ve mejor la ruta del palo y tu postura; la velocidad es un poco menos exacta (mejora si la app oye el golpe). La subida se dibuja en azul y la bajada en amarillo: si la bajada pasa por fuera de la subida, es la bajada «por encima». Basta con que se vea bien tu lado cercano a la cámara. Cambia la vista en Ajustes.</li>
+      <li><b>Desde atrás</b>: el teléfono unos 3 metros detrás de ti, sobre la línea de tiro, a la altura de tus manos y mirando hacia el objetivo, con todo tu cuerpo en la imagen. Ve mejor la ruta del palo y tu postura; la velocidad es un poco menos exacta (mejora si la app oye el golpe). La subida se dibuja en azul y la bajada en amarillo: si la bajada pasa por fuera de la subida, es la bajada «por encima». Basta con que se vea bien tu lado cercano a la cámara. Cambia la vista en Ajustes.
+        <svg class="guideSvg dtlSvg" viewBox="0 0 320 168" role="img" aria-label="Desde atrás la cámara te debe ver de perfil, con las manos y la bola a la vista; si te ve de espaldas, tus manos quedan tapadas">
+          <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="22" y="8" width="122" height="136" rx="12" stroke-width="2" opacity=".5"/>
+            <rect x="176" y="8" width="122" height="136" rx="12" stroke-width="2" opacity=".5"/>
+            <line x1="122" y1="132" x2="70" y2="20" stroke="#78dcff" stroke-width="2" stroke-dasharray="5 4"/>
+            <circle cx="66" cy="34" r="8" stroke-width="3"/>
+            <path d="M58 84 L74 48 M74 48 L92 92 M58 84 L66 108 L60 132 M58 84 L54 108 L50 132" stroke-width="4"/>
+            <path d="M92 92 L120 128" stroke="var(--accent)" stroke-width="3"/>
+            <circle cx="238" cy="30" r="9" stroke-width="3"/>
+            <path d="M214 50 L262 50 M238 50 L238 90 M224 90 L252 90 M224 90 L218 132 M252 90 L258 132 M214 50 L210 84 M262 50 L266 84" stroke-width="4"/>
+          </g>
+          <circle cx="122" cy="132" r="4" fill="#fff" stroke="currentColor"/>
+          <text x="83" y="160" text-anchor="middle" font-size="12" font-weight="700" fill="#2e9e5b">✓ De perfil</text>
+          <text x="237" y="160" text-anchor="middle" font-size="12" font-weight="700" fill="#d2483a">✗ De espaldas</text>
+          <text x="237" y="116" text-anchor="middle" font-size="10" fill="currentColor" opacity=".8">manos tapadas</text>
+        </svg></li>
       <li>En la ventana de la cámara verás qué corregir y una flecha 🎯 hacia el objetivo. Cuando el borde se ponga verde, haz tu swing.</li>
     </ul>
     <div class="row"><button class="ghost primary" id="guideOk">Entendido</button></div>
@@ -680,15 +740,16 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.18"></script>
-<script src="js/courses.js?v=0.18"></script>
-<script src="js/world3d.js?v=0.18"></script>
-<script src="js/sound.js?v=0.18"></script>
-<script src="js/camera.js?v=0.18"></script>
-<script src="js/online-config.js?v=0.18"></script>
-<script src="js/online.js?v=0.18"></script>
-<script src="js/vstore.js?v=0.18"></script>
-<script src="js/coach.js?v=0.18"></script>
-<script src="js/app.js?v=0.18"></script>
+<script src="js/engine.js?v=0.19"></script>
+<script src="js/courses.js?v=0.19"></script>
+<script src="js/wardrobe.js?v=0.19"></script>
+<script src="js/world3d.js?v=0.19"></script>
+<script src="js/sound.js?v=0.19"></script>
+<script src="js/camera.js?v=0.19"></script>
+<script src="js/online-config.js?v=0.19"></script>
+<script src="js/online.js?v=0.19"></script>
+<script src="js/vstore.js?v=0.19"></script>
+<script src="js/coach.js?v=0.19"></script>
+<script src="js/app.js?v=0.19"></script>
 </body>
 </html>

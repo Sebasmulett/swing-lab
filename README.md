@@ -4,6 +4,8 @@ Mide la velocidad, el tempo y la ruta de tu swing de golf con el celular (sensor
 
 Con la cámara, la app usa obturador rápido donde el navegador lo permite (menos imagen corrida y más cuadros por segundo) y puede oír el impacto con el micrófono para marcarlo al milisegundo.
 
+Desde atrás basta con que se vea tu lado cercano a la cámara: la quietud del address y el arranque del swing se miden en ventanas de varios cuadros, así el temblor del detector (mayor de perfil, donde una mano tapa a la otra) no impide que la cámara quede lista. Si la vista elegida no coincide con lo que ve la cámara, la app cambia sola. El botón 🔍 de la cámara muestra qué ve el detector y qué le falta.
+
 Campos disponibles, inspirados en hoyos reales (distancias, forma y trampas en su lugar):
 
 - **Country Club de Bogotá · Los Fundadores** — 18 hoyos (a 2.600 m: la bola vuela más)
@@ -23,6 +25,10 @@ Los nombres de los campos se usan solo como referencia; la app no está afiliada
 - **Strokes Gained** por categoría (salida, al green, alrededor del green, putts) contra un hándicap 15 o el PGA Tour, más calles, greens en regulación, up & down y penalidades.
 - **Práctica con video y coach**: cada swing con la cámara queda en video (solo en el teléfono) con sus líneas; al final de la práctica, las fallas que más se repiten y ejercicios con una meta medible.
 - **Estrategia según tu dispersión**: la elipse de tus tiros sobre el hoyo y el punto de apuntar con menos golpes esperados.
+
+## Vestuario (maqueta)
+
+El golfista 3D se puede vestir: camiseta, pantalón, gorra, zapatos, guante, tono de piel y bolsa, con conjuntos listos. La gorra, el pecho y la bolsa tienen espacios de marca para futuras alianzas; las marcas que aparecen son inventadas, solo de ejemplo.
 
 ## Ranking en línea
 

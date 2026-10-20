@@ -24,8 +24,20 @@ function toFrame(lm, wl, t, W, H){
 // basta con ver bien el lado cercano de cada par.
 let VIEW="front";
 const vis2=(f,a,b,th)=>Math.max(f.v[a]??0,f.v[b]??0)>th;
-const visibleBody=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.5) && vis2(f,"lh","rh",0.5) && vis2(f,"lw","rw",0.4) && Math.min(f.v.lw??0,f.v.rw??0)>0.12
+// Las dos manos van juntas en el grip: si una muñeca casi no se ve (tapada por el cuerpo) y la otra sí,
+// se usa la que se ve para las dos (la tapada suele salir pegada al cuerpo y movería el punto medio)
+function fixWrists(f){
+  if(!f || f.none || !f.p || !f.p.lw || !f.p.rw || f._fx) return f; f._fx=1; const a=f.v.lw??1, b=f.v.rw??1;
+  const cp=(bad,good,vb)=>{ f.p[bad]=f.p[good].slice(); if(f.m && f.m[good]) f.m[bad]=f.m[good].slice(); f.v[bad]=Math.max(f.v[bad]??0, vb*0.75); };
+  if(a<0.35 && b>=a+0.25) cp("lw","rw",b); else if(b<0.35 && a>=b+0.25) cp("rw","lw",a);
+  return f; }
+SL.fixWrists=fixWrists;
+const visibleBody=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.4) && vis2(f,"lh","rh",0.4) && vis2(f,"lw","rw",0.3)
                                         : ["ls","rs","lw","rw","lh","rh"].every(k=>f.v[k]>0.45);
+// ¿de frente o de perfil? ancho de hombros contra largo del torso en los cuadros quietos del address (manos abajo)
+SL.guessView=function(F){ const r=[]; for(const f of F){ if(!f||f.none||!f.p||!f.p.ls||!f.p.lh) continue; const tor=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1;
+    if(mid(f.p.lw,f.p.rw)[1]>mid(f.p.ls,f.p.rs)[1]+0.55*tor) r.push(dist(f.p.ls,f.p.rs)/tor); if(r.length>=20) break; }
+  if(r.length<5) return null; const m=median(r); return m<0.4?"behind":m>0.6?"front":null; };
 
 // ---------------- utilidades numéricas ----------------
 // mínimos cuadrados polinómicos (coeficientes a0..adeg)
@@ -68,7 +80,7 @@ const HAND_K=1.672;   // con brazo de 0,62 m y driver: palo ≈ 4,8 × manos (go
 SL.camRatio=(club, arm=0.62, grip="club")=>{ const L=SL.CLUB_LEN[club]||1; return HAND_K*(arm+L)/arm*(grip==="club"?1:0.92); };
 SL.analyzePose=function(F, clubKey, opts={}){
   const grip=opts.grip||"empty", view=opts.view||"front";
-  F=F.filter(f=>f && f.p && f.p.lw);
+  F=F.filter(f=>f && f.p && f.p.lw).map(fixWrists);
   if(F.length<15) return {error:"La cámara no captó suficientes cuadros del swing. Revisa la luz y que se vea todo tu cuerpo.", code:"few"};
   const n=F.length;
   // tiempos: si vienen del bucle de pantalla (con retraso variable) y no hubo cuadros perdidos, se regularizan
@@ -88,9 +100,10 @@ SL.analyzePose=function(F, clubKey, opts={}){
   const spd=Hs.map((h,i)=>{ const a=Hs[Math.max(0,i-1)], b=Hs[Math.min(n-1,i+1)], dt=(t[Math.min(n-1,i+1)]-t[Math.max(0,i-1)])/1000; return dt>0?dist(a,b)/dt:0; }); // px/s
   let vmax=0; for(let i=1;i<n;i++) if(spd[i]>spd[vmax]) vmax=i;
   if(spd[vmax]*mPerPx<1.2) return {error:"No vi un swing: las manos se movieron muy despacio.", code:"slow", obs:0};
-  // address: tramo quieto antes del movimiento rápido
+  // address: tramo quieto antes del movimiento rápido (velocidad en ~140 ms: el temblor del detector no lo rompe)
+  const spdW=Hs.map((h,i)=>{ let j0=i, j1=i; while(j0>0 && t[i]-t[j0-1]<=72) j0--; while(j1<n-1 && t[j1+1]-t[i]<=72) j1++; const dt=(t[j1]-t[j0])/1000; return dt>0?dist(Hs[j0],Hs[j1])/dt:0; });
   const still=torsoPx*0.45; let a=-1;
-  for(let i=vmax;i>=0;i--){ if(spd[i]<still){ let b=i; while(b>0 && spd[b-1]<still) b--; if(t[i]-t[b]>=250){ a=i; break; } i=b; } }
+  for(let i=vmax;i>=0;i--){ if(spdW[i]<still){ let b=i; while(b>0 && spdW[b-1]<still) b--; if(t[i]-t[b]>=250){ a=i; break; } i=b; } }
   if(a<0) a=0;
   // ángulo de las manos alrededor de los hombros, con las manos sin suavizar para no correr la cima ni el impacto
   const v0=[Hn[a][0]-Sh[a][0], Hn[a][1]-Sh[a][1]];
@@ -118,8 +131,9 @@ SL.analyzePose=function(F, clubKey, opts={}){
   let imp=-1, tImp;
   if(view==="behind"){
     // desde atrás la subida y el final se ven del mismo lado: el impacto es cuando las manos vuelven más cerca del address
-    let m=-1; for(let i=top+1;i<n && t[i]-t[top]<=900;i++){ if(m<0 || ang[i]<ang[m]) m=i; if(m>=0 && ang[i]>ang[m]+15*DEG) break; }
-    if(m>0 && ang[m]<0.4*ang[top]){ imp=m; const y0=ang[m-1], y1=ang[m], y2=ang[Math.min(n-1,m+1)], den=y0-2*y1+y2;
+    // (un cuadro ruidoso no corta la búsqueda: hacen falta dos seguidos por encima del mínimo)
+    let m=-1, up=0; for(let i=top+1;i<n && t[i]-t[top]<=950;i++){ if(m<0 || ang[i]<ang[m]){ m=i; up=0; } else if(ang[i]>ang[m]+15*DEG){ if(++up>=2) break; } else up=0; }
+    if(m>0 && ang[m]<0.45*ang[top]){ imp=m; const y0=ang[m-1], y1=ang[m], y2=ang[Math.min(n-1,m+1)], den=y0-2*y1+y2;
       const off=den>1e-6?clamp(0.5*(y0-y2)/den,-0.5,0.5):0; tImp=t[m]+off*((t[Math.min(n-1,m+1)]-t[m-1])/2); }
   } else { for(let i=top+1;i<n && t[i]-t[top]<=1200;i++) if(ang[i]<=0){ imp=i; break; }
     if(imp>0){ const fr=ang[imp-1]/((ang[imp-1]-ang[imp])||1); tImp=t[imp-1]+(t[imp]-t[imp-1])*fr; } }
@@ -304,7 +318,7 @@ SL.synthPose=function(o={}){
 };
 
 // ---------------- cámara en vivo ----------------
-const Cam=SL.Cam={ on:false, loading:false, fps:0, camFps:0, model:null, drops:0, detectMs:0 };
+const Cam=SL.Cam={ on:false, loading:false, fps:0, camFps:0, model:null, drops:0, detectMs:0, diag:{} };
 let video, canvas, ctx, stream=null, landmarker=null, modelKind=null, raf=0, vfc=0, lastVT=-1, buf=[], trail=[], cb={}, opts={};
 let st="idle", stillSince=null, capStart=0, quietSince=null, coolUntil=0, lastFrame=null, fpsTimes=[], replaying=null, mock=null;
 let lastT=0, lastPF=null, detTimes=[], switching=false, mpMod=null, mpFiles=null;
@@ -344,7 +358,7 @@ Cam.start=async function(o){
     }
   }catch(e){ Cam.loading=false; stopStream(); status(e && e.name==="NotAllowedError" ? "Sin permiso para usar la cámara. Actívalo en los ajustes del navegador." : "No pude iniciar la cámara o el detector ("+(e&&e.message||e)+"). Revisa la conexión la primera vez.","bad"); cb.onError&&cb.onError(e); return false; }
   if(!mock) window.addEventListener("devicemotion",onMotion);
-  Cam.loading=false; Cam.on=true; st="seek"; buf=[]; trail=[]; coolUntil=0; stillSince=null; lastT=0; lastPF=null; Cam.drops=0;
+  Cam.loading=false; Cam.on=true; st="seek"; buf=[]; trail=[]; hist=[]; coolUntil=0; stillSince=null; lastT=0; lastPF=null; Cam.drops=0;
   video.classList.toggle("mirror", (opts.facing||"user")==="user"); canvas.classList.toggle("mirror", (opts.facing||"user")==="user");
   schedule(); return true;
 };
@@ -404,8 +418,8 @@ Cam.lastClip=null;
 function stopStream(){ recStop(false); window.removeEventListener("devicemotion",onMotion); Cam.tilt=null; if(SL.Sound) SL.Sound.stop(); if(stream){ stream.getTracks().forEach(tr=>tr.stop()); stream=null; } if(video) video.srcObject=null; }
 Cam.stop=function(){ Cam.on=false; cancelAnimationFrame(raf); raf=0; if(vfc && video && video.cancelVideoFrameCallback) try{ video.cancelVideoFrameCallback(vfc); }catch(_){} vfc=0; stopStream(); st="idle"; lockUntil=0; status(null); if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height); };
 // pausa la lectura (para apuntar o mientras vuela la bola); al seguir, da unos segundos para ponerse en posición
-Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ recStop(false); st="seek"; stillSince=null; readyHip=null; return; }
-  st="seek"; stillSince=null; readyHip=null; buf=[]; coolUntil=performance.now()+grace; Cam.graceMsg=msg; if(msg) status(msg+" "+Math.ceil(grace/1000),"wait"); };
+Cam.pause=function(p, grace=500, msg=null){ Cam.paused=p; trail=[]; if(p){ recStop(false); st="seek"; stillSince=null; readyHip=null; readyHand=null; hist=[]; return; }
+  st="seek"; stillSince=null; readyHip=null; readyHand=null; hist=[]; buf=[]; coolUntil=performance.now()+grace; Cam.graceMsg=msg; if(msg) status(msg+" "+Math.ceil(grace/1000),"wait"); };
 
 let lockUntil=0;
 function status(text,kind){ if(performance.now()<lockUntil) return; Cam.state=kind; cb.onStatus && cb.onStatus(text,kind); }
@@ -451,11 +465,15 @@ function handle(f){
 }
 // Guía de colocación: qué falta para que la cámara te lea bien
 function missingHint(f){
-  if(f.none || !f.v) return "No te veo: ponte frente a la cámara, a 2 o 3 metros";
+  if(f.none || !f.v) return VIEW==="behind" ? "No te veo: el teléfono a unos 3 m, detrás de tus manos y mirando al objetivo (te debes ver de perfil)" : "No te veo: ponte frente a la cámara, a 2 o 3 metros";
   if((f.v.la??1)<0.45 && (f.v.ra??1)<0.45) return "No veo tus pies: aleja el teléfono o apúntalo un poco más abajo";
+  if(VIEW==="behind"){
+    // de espaldas a la cámara: hombros anchos, la cara no se ve y las manos quedan tapadas por el cuerpo
+    if(f.p && f.p.ls && vis2(f,"ls","rs",0.4) && (f.v.nose??1)<0.5){ const tor=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1; if(dist(f.p.ls,f.p.rs)/tor>0.6) return "Te veo de espaldas: la cámara debe verte de perfil, detrás de tus manos, mirando hacia el objetivo"; }
+    if(!vis2(f,"ls","rs",0.4)||!vis2(f,"lh","rh",0.4)) return "No te veo completo: aleja un poco el teléfono, con todo tu cuerpo de perfil en la imagen";
+    if(!vis2(f,"lw","rw",0.3)) return "No veo bien tus manos: más luz, o ropa que contraste con el fondo"; }
   if((f.v.nose??1)<0.45) return "No veo tu cabeza: aleja el teléfono o apúntalo un poco más arriba";
-  if(VIEW==="behind"){ if(!vis2(f,"lw","rw",0.4)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
-    if(!vis2(f,"ls","rs",0.5)||!vis2(f,"lh","rh",0.5)) return "No te veo completo: el teléfono detrás de ti, a unos 3 metros, con todo tu cuerpo en la imagen"; }
+  if(VIEW==="behind") return "No te veo completo: todo tu cuerpo de perfil en la imagen";
   else if(["lw","rw"].some(k=>f.v[k]<0.45)) return "No veo bien tus manos: más luz o ropa que contraste con el fondo";
   return "No te veo completo: ponte a 2 o 3 metros, con todo el cuerpo en la imagen"; }
 function setupHint(f){
@@ -465,7 +483,7 @@ function setupHint(f){
   if(hgt<0.42) return "Muy lejos: acércate un poco a la cámara";
   if(cx<0.22 || cx>0.78) return "Muévete al centro de la imagen";
   if(opts.view!=="behind" && r<0.42) return "Ponte de frente a la cámara (el objetivo a un lado)";
-  if(opts.view==="behind" && r>0.62) return "Para la vista desde atrás, la cámara va detrás de ti, mirando al objetivo";
+  if(opts.view==="behind" && r>0.62) return "Desde atrás te debes ver de perfil: el teléfono detrás de tus manos, sobre la línea de tiro, mirando al objetivo";
   if(opts.view==="behind"){ const hy=mid(p.lw,p.rw)[1]/H; if(hy<0.35) return "Baja el teléfono: a la altura de tus manos"; if(hy>0.85) return "Sube el teléfono: a la altura de tus manos";
     // sobre la línea de tiro los pies se ven uno detrás del otro; si se separan de lado, la cámara quedó corrida
     if((f.v.la??0)>0.5 && (f.v.ra??0)>0.5 && p.la && p.ra){ const out=Math.sign(mid(p.lw,p.rw)[0]-mid(p.lh,p.rh)[0])||1, far=p.la[1]<p.ra[1]?p.la:p.ra, near=far===p.la?p.ra:p.la, k=(far[0]-near[0])*out/tor;
@@ -475,45 +493,73 @@ function setupHint(f){
   return null; }
 // máquina de estados: buscar cuerpo → quieto en address → swing → final
 // Solo se dispara desde "listo" (quieto en address): caminar o acomodarse ya no se confunde con un swing.
-const coreVisible=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.4) && vis2(f,"lh","rh",0.4) : ["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
-let readyHip=null, viewVotes=0;
+// La quietud y la velocidad se miden en ventanas de varios cuadros (no cuadro a cuadro): el temblor normal del
+// detector —mayor desde atrás, donde una mano tapa a la otra— ya no impide quedar "listo" ni dispara swings falsos.
+const coreVisible=f=> VIEW==="behind" ? vis2(f,"ls","rs",0.35) && vis2(f,"lh","rh",0.35) : ["ls","rs","lh","rh"].every(k=>f.v[k]>0.45);
+let readyHip=null, readyHand=null, viewVotes=0, hist=[], handsLost=null;
+const STILL_K=0.11, STILL_MS=420;
+// dispersión de las manos en la última ventana (percentil 85 de la distancia a la mediana), en torsos
+// (con pocos cuadros por segundo —teléfonos lentos— la ventana se alarga hasta tener al menos 4 cuadros)
+function spreadOf(now, ms, tor){ let P=hist.filter(q=>q.t>=now-ms); if(P.length<4) P=hist.slice(-4);
+  if(P.length<3 || now-P[0].t<ms*0.7 || now-P[0].t>2600) return Infinity;
+  const mx=median(P.map(q=>q.h[0])), my=median(P.map(q=>q.h[1])), d=P.map(q=>Math.hypot(q.h[0]-mx,q.h[1]-my)).sort((x,y)=>x-y);
+  return d[Math.min(d.length-1,Math.floor(d.length*0.85))]/tor; }
+// velocidad de las manos en los últimos ~ms (torsos por segundo)
+function speedOver(now, ms, tor){ const c=hist[hist.length-1]; if(!c) return 0; let j=hist.length-1; while(j>0 && now-hist[j].t<ms) j--;
+  const q=hist[j]; return q===c||c.t<=q.t ? 0 : dist(c.h,q.h)/((c.t-q.t)/1000)/tor; }
+const handOf=f=>mid(f.p.lw,f.p.rw);
+function voteView(f){
+  // ¿de frente o de perfil? si no coincide con lo elegido, avisa a la app (cambia sola de vista).
+  // Solo con postura de address (manos abajo y quietas): sosteniendo el final los hombros se ven angostos y parecería "de perfil".
+  // Se vota aunque el cuerpo no pase el filtro de la vista elegida (justo cuando la vista está mal, no pasa).
+  if(f.none || !f.p || !f.p.ls || !vis2(f,"ls","rs",0.4) || !vis2(f,"lh","rh",0.4) || !vis2(f,"lw","rw",0.3)) return;
+  const torso=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1, handsLow=handOf(f)[1]>mid(f.p.ls,f.p.rs)[1]+0.55*torso;
+  if(!handsLow || (Cam.speed||0)>0.8) return;
+  const r=dist(f.p.ls,f.p.rs)/torso, guess=r<0.38?"behind":r>0.6?"front":null;
+  viewVotes=guess && guess!==(opts.view||"front") ? viewVotes+1 : 0;
+  if(viewVotes>=40){ viewVotes=0; cb.onView && cb.onView(guess); } }
 function step(f){
   const now=f.t;
   if(Cam.paused){ trail=[]; return; }
+  fixWrists(f);
+  if(st!=="capture") voteView(f);
   // durante el swing las muñecas se ven borrosas: basta con ver hombros y caderas (las manos se estiman igual)
-  const ok=!f.none && (st==="capture" ? coreVisible(f) && ["lw","rw"].every(k=>f.v[k]>0.1) : visibleBody(f));
-  if(!ok){ if(st!=="capture"){ st="seek"; stillSince=null; readyHip=null; trail=[]; status(missingHint(f),"bad"); } return; }
+  // ya listo, un cuadro borroso al arrancar (las manos bajan su visibilidad) no tumba el "listo": basta el tronco,
+  // salvo que las manos sigan sin verse más de 0,6 s
+  let ok=!f.none && f.p && f.p.lw && (st==="capture" ? coreVisible(f) : st==="ready" ? coreVisible(f) : visibleBody(f));
+  if(st==="ready"){ if(ok && visibleBody(f)) handsLost=null; else { if(handsLost==null) handsLost=now; if(now-handsLost<=600){ if(!ok) return; } else ok=false; } }
+  Cam.diag.vis=f.v?{h:Math.max(f.v.lw??0,f.v.rw??0), s:Math.max(f.v.ls??0,f.v.rs??0), c:Math.max(f.v.lh??0,f.v.rh??0)}:null;
+  if(!ok){ if(st!=="capture"){ st="seek"; stillSince=null; readyHip=null; readyHand=null; trail=[]; hist=[]; const h=missingHint(f); Cam.diag.why=h; status(h,"bad"); } return; }
   buf.push(f); while(buf.length && now-buf[0].t>6500) buf.shift();
-  const torso=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1, hand=mid(f.p.lw,f.p.rw), hip=mid(f.p.lh,f.p.rh);
-  const prev=buf[buf.length-2]; let v=0; if(prev && prev.p){ const h0=mid(prev.p.lw,prev.p.rw); v=dist(hand,h0)/Math.max(0.001,(now-prev.t)/1000)/torso; }
-  Cam.speed=v;
+  const torso=dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1, hand=handOf(f), hip=mid(f.p.lh,f.p.rh);
+  hist.push({t:now, h:hand}); while(hist.length>4 && now-hist[0].t>1200) hist.shift(); while(hist.length && now-hist[0].t>2600) hist.shift();
+  const v=speedOver(now, 90, torso), spr=spreadOf(now, STILL_MS, torso);
+  Cam.speed=v; Cam.diag.speed=v; Cam.diag.spread=spr; Cam.diag.state=st; Cam.diag.n=hist.length; Cam.diag.span=hist.length?Math.round(now-hist[0].t):0;
   if(now<coolUntil){ trail=[]; if(Cam.graceMsg) status(Cam.graceMsg+" "+Math.ceil((coolUntil-now)/1000),"wait"); return; }
   if(st==="seek"||st==="ready"){
     trail=[];
-    if(st==="seek"){ const hn=v<0.6?setupHint(f):null; status(hn||"Quieto en address…", hn?"bad":"wait"); }
-    if(v<0.3){ if(stillSince==null) stillSince=now; else if(st==="seek" && now-stillSince>=450){ st="ready"; readyHip=hip; status("¡Listo! Haz tu swing","ready"); recStart(); cb.onReady&&cb.onReady(); } }
+    const still=spr<STILL_K;
+    if(st==="seek"){ const hn=v<1?setupHint(f):null; Cam.diag.why=hn||(still?null:"esperando quietud en address"); status(hn||"Quieto en address…", hn?"bad":"wait");
+      if(still){ st="ready"; readyHip=hip; readyHand=hand; Cam.diag.why=null; status("¡Listo! Haz tu swing","ready"); recStart(); cb.onReady&&cb.onReady(); } }
+    else if(still){ readyHand=[(readyHand[0]*3+hand[0])/4,(readyHand[1]*3+hand[1])/4]; }
     // si esperas mucho en el address, el video vuelve a empezar (para que no quede largo)
     if(st==="ready" && Rec.cur && performance.now()-Rec.cur.t0>9000){ recStop(false).then(()=>{ if(st==="ready") recStart(); }); }
-    else if(v>0.6) stillSince=null;
+    const disp=readyHand?dist(hand,readyHand)/torso:0;
     // si caminas (la cadera se va del sitio) vuelve a esperar el address
-    if(st==="ready" && readyHip && dist(hip,readyHip)>0.4*torso && v<2.2){ st="seek"; stillSince=null; readyHip=null; recStop(false); }
-    if(st==="ready" && v>2.2){ st="capture"; capStart=now; quietSince=null; status("Leyendo swing…","wait"); }
-    // ¿de frente o de perfil? si no coincide con lo elegido, avisa a la app (cambia sola de vista)
-    // solo en una postura de address (manos abajo): sosteniendo el final los hombros se ven angostos y parecería "de perfil"
-    const handsLow=mid(f.p.lw,f.p.rw)[1]>mid(f.p.ls,f.p.rs)[1]+0.55*torso;
-    if(v<0.5 && handsLow){ const r=dist(f.p.ls,f.p.rs)/(dist(mid(f.p.ls,f.p.rs),mid(f.p.lh,f.p.rh))||1), guess=r<0.38?"behind":r>0.6?"front":null;
-      viewVotes=guess && guess!==(opts.view||"front") ? viewVotes+1 : 0;
-      if(viewVotes>=45){ viewVotes=0; cb.onView && cb.onView(guess); } }
-    if(st==="ready" && (opts.view==="behind")) Cam.addrLines={hand:mid(f.p.lw,f.p.rw), sh:mid(f.p.ls,f.p.rs), hip:mid(f.p.lh,f.p.rh)};
+    if(st==="ready" && readyHip && dist(hip,readyHip)>0.4*torso && v<1.5){ st="seek"; readyHip=null; readyHand=null; recStop(false); }
+    // arranca el swing: las manos ya se alejaron del address con decisión, o van rápido
+    if(st==="ready" && ((disp>0.45 && v>0.9) || v>2.4)){ st="capture"; capStart=now; quietSince=null; Cam.diag.why=null; status("Leyendo swing…","wait"); }
+    if(st==="ready" && (opts.view==="behind")) Cam.addrLines={hand, sh:mid(f.p.ls,f.p.rs), hip};
     if(st==="seek") Cam.addrLines=null;
   } else if(st==="capture"){
     // fase del trazo: subida hasta el punto más alto; bajada cuando las manos ya cayeron un poco desde ahí
     const minY=trail.reduce((m,q)=>Math.min(m,q.p[1]),hand[1]), down=trail.length>3 && hand[1]>minY+0.12*torso && trail.some(q=>q.p[1]<=minY+0.02*torso && q.t<now-60);
     trail.push({t:now, p:hand, d:down || (trail.length && trail[trail.length-1].d)}); while(trail.length && now-trail[0].t>1600) trail.shift();
-    if(v<0.35){ if(quietSince==null) quietSince=now; } else quietSince=null;
-    if((quietSince!=null && now-quietSince>=450 && now-capStart>600) || now-capStart>3800){
+    // fin: manos quietas en el final (en ventana, con más tolerancia: arriba las manos tiemblan más) o tiempo máximo
+    const quiet=spreadOf(now, 380, torso)<0.16 && v<0.8;
+    if((quiet && now-capStart>800) || now-capStart>3800){
       { const cur=Rec.cur; Rec.cur=null; Cam.lastClip=cur ? new Promise(r=>setTimeout(()=>recFinish(cur,true).then(r),350)) : null; }
-      const frames=buf.slice(); keepThumbs(frames); st="seek"; stillSince=null; readyHip=null; coolUntil=now+1200; Cam.graceMsg=null; trail=[];
+      const frames=buf.slice(); keepThumbs(frames); st="seek"; stillSince=null; readyHip=null; readyHand=null; hist=[]; coolUntil=now+1200; Cam.graceMsg=null; trail=[];
       cb.onSwing && cb.onSwing(frames);
     }
   }
@@ -535,7 +581,26 @@ function draw(f){
   if(opts.view==="behind" && Cam.addrLines) planeLines(Cam.addrLines,M,w,h);
   if(trail.length>1){ ctx.lineWidth=3.5; ctx.lineCap="round";
     for(let i=1;i<trail.length;i++){ const A=M(trail[i-1].p), B=M(trail[i].p); ctx.strokeStyle=trail[i].d?"rgba(255,210,63,0.95)":"rgba(120,220,255,0.95)"; ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); } }
+  if(Cam.showDiag) drawDiag(w,h);
 }
+// Diagnóstico en pantalla: qué ve la cámara y por qué (no) se dispara el swing
+const ST_TXT={seek:"buscando address", ready:"listo", capture:"leyendo swing", idle:"apagada"};
+function drawDiag(w,h){ const D=Cam.diag||{}, V=D.vis||{}, pc=x=>x==null?"–":Math.round(x*100)+"%", ok=(x,th)=>x!=null&&x>th;
+  const lines=[
+    [`Vista: ${VIEW==="behind"?"desde atrás":"de frente"} · ${Cam.fps||0} fps · ${Cam.model||""}`, null],
+    [`Estado: ${ST_TXT[D.state]||D.state||"–"}`, D.state==="ready"||D.state==="capture"],
+    [`Manos ${pc(V.h)} · hombros ${pc(V.s)} · cadera ${pc(V.c)}`, ok(V.h,VIEW==="behind"?0.3:0.45)&&ok(V.s,0.4)&&ok(V.c,0.4)],
+    [`Quietud ${isFinite(D.spread)?D.spread.toFixed(2):"–"} (listo < ${STILL_K}) · manos ${D.speed!=null?D.speed.toFixed(1):"–"} torsos/s`, isFinite(D.spread)&&D.spread<STILL_K],
+    D.why?[`Falta: ${D.why}`, false]:null,
+    D.last?[`Último swing: ${D.last}`, D.lastOk]:null ].filter(Boolean);
+  ctx.save(); if(canvas.classList.contains("mirror")){ ctx.translate(w,0); ctx.scale(-1,1); }
+  ctx.font="600 11px Figtree, system-ui, sans-serif"; const lh=15, maxW=w-24, wr=[];
+  for(const [t,g] of lines){ let cur=""; for(const word of t.split(" ")){ const nx=cur?cur+" "+word:word; if(cur && ctx.measureText(nx).width>maxW){ wr.push([cur,g]); cur=word; } else cur=nx; } if(cur) wr.push([cur,g]); }
+  lines.length=0; lines.push(...wr); const bw=Math.min(w-12, 8+Math.max(...lines.map(l=>ctx.measureText(l[0]).width)));
+  const y0=Math.max(6, h-64-(lines.length*lh+8));   // abajo, encima de los botones (arriba van la etiqueta del objetivo y el aviso)
+  ctx.fillStyle="rgba(0,0,0,0.62)"; ctx.fillRect(6,y0,bw,lines.length*lh+8);
+  lines.forEach(([t,g],i)=>{ ctx.fillStyle=g==null?"#fff":g?"#7ee2a8":"#ffb4a8"; ctx.fillText(t,10,y0+14+i*lh); });
+  ctx.restore(); }
 // líneas guía de la vista desde atrás: la columna (cadera-hombros) y el plano (manos-hombros), alargadas
 function planeLines(L,M,w,h){ const ext=(a,b,k)=>[a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k];
   const seg=(a,b,col,dash)=>{ const A=M(a), B=M(b); ctx.save(); ctx.strokeStyle=col; ctx.lineWidth=2.5; ctx.setLineDash(dash||[]); ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); ctx.restore(); };
@@ -594,6 +659,8 @@ Cam.keyFrames=function(res, cv, mir){
       ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--ink")||"#222"; ctx.font="600 12px Figtree, system-ui, sans-serif"; ctx.textAlign="center"; ctx.fillText(name, cx0+cw/2, H-4); });
   } finally { ctx=old; }
   return true; };
+// pruebas: alimentar la máquina de estados con cuadros sintéticos
+Cam._test={ init(o){ opts=o||{}; cb=opts; VIEW=opts.view||"front"; st="seek"; buf=[]; trail=[]; hist=[]; coolUntil=0; stillSince=null; readyHip=null; readyHand=null; quietSince=null; viewVotes=0; }, step:f=>step(f), st:()=>st };
 Cam.stopReplay=()=>{ replaying=null; if(canvas) canvas.classList.remove("replay"); };
 Cam.replaying=()=>!!replaying;
 })();

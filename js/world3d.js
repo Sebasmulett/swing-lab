@@ -394,7 +394,20 @@ function paintDetail(x,z){
 // Muñeco low-poly que se para junto a la bola y repite TU swing (largo de subida, final y ritmo medidos) antes del vuelo.
 // Marco local: X hacia la bola, Y arriba, Z hacia atrás (lado de la subida). Para zurdos se espeja en Z.
 const DEG3=Math.PI/180;
-let G=null;
+let G=null, pendingOutfit=null;
+// ropa y marcas del golfista (ver wardrobe.js)
+function logoTex(id){ if(!G || !SL.Wardrobe || id==="none") return null; if(G.logoTex[id]) return G.logoTex[id];
+  const c=document.createElement("canvas"); c.width=256; c.height=128; SL.Wardrobe.drawLogo(c.getContext("2d"),256,128,id);
+  const t=new T.CanvasTexture(c); t.anisotropy=4; G.logoTex[id]=t; return t; }
+W3.setOutfit=function(o){ if(!G){ pendingOutfit=o; return; } const M=G.mat;
+  for(const k of ["shirt","pants","cap","shoe","glove","skin"]) if(o[k]!=null) M[k].color.setHex(o[k]);
+  if(o.bag!=null) G.bagBody.material.color.setHex(o.bag);
+  for(const [slot,mesh] of [["capLogo",G.capLogo],["chestLogo",G.chestLogo],["bagLogo",G.bagLogo]]){ if(o[slot]==null) continue; const t=logoTex(o[slot]);
+    mesh.visible=!!t; if(t){ mesh.material.map=t; mesh.material.needsUpdate=true; } }
+  // zurdo: el cuerpo va espejado; los parches del cuerpo se des-espejan para que el texto se lea bien
+  G.capLogo.scale.x=G.chestLogo.scale.x=G.lh?-1:1; };
+// cámara de estudio para el vestuario: de frente al golfista, girando despacio
+W3.studio=function(on){ if(!W3.ok) return; S.studio=on?{t0:clock.elapsedTime}:null; if(!on && S.address){ const a=S.address; W3.address(a.x,a.z,a.yaw,false); } };
 function buildGolfer(){
   const DS=T.DoubleSide, M=c=>new T.MeshLambertMaterial({color:c, side:DS});
   const mat={shirt:M(0x1f5f8b), pants:M(0x2f333a), skin:M(0xc79068), shoe:M(0xf2f2ef), cap:M(0xf5f5f2), glove:M(0xfafafa), grip:M(0x1b1b1b),
@@ -410,6 +423,10 @@ function buildGolfer(){
   add(torso,new T.CylinderGeometry(0.05,0.06,0.1,8),mat.skin,0.02,0.6,0);
   const head=add(torso,new T.SphereGeometry(0.105,14,10),mat.skin,0.04,0.72,0);
   { const c=new T.SphereGeometry(0.112,14,8,0,Math.PI*2,0,Math.PI*0.5); add(head,c,mat.cap,0,0.015,0); const brim=new T.CylinderGeometry(0.075,0.075,0.012,14,1,false,-Math.PI/2,Math.PI); brim.scale(1.6,1,1.1); add(head,brim,mat.cap,0.06,0.02,0); }
+  // espacios de marca: parche al frente de la gorra y en el pecho (lado izquierdo)
+  const decal=(par,w,h,x,y,z)=>{ const m=new T.Mesh(new T.PlaneGeometry(w,h), new T.MeshBasicMaterial({transparent:true, side:DS, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-4})); m.position.set(x,y,z); m.rotation.y=Math.PI/2; m.visible=false; par.add(m); return m; };
+  const capLogo=decal(head,0.112,0.056,0.104,0.062,0); capLogo.rotation.z=-0.32;
+  const chestLogo=decal(sh,0.105,0.0525,0.124,-0.13,-0.072);
   const shoeG=new T.BoxGeometry(0.27,0.08,0.11); const sL=add(root,shoeG,mat.shoe,0.07,0.04,-0.21), sR=add(root,shoeG,mat.shoe,0.07,0.04,0.21);
   const glove=add(hands,new T.SphereGeometry(0.048,10,8),mat.glove,0,0,0);
   // palo: grip, varilla y cabeza (se ajusta al palo elegido)
@@ -421,8 +438,19 @@ function buildGolfer(){
   // sombra suave a los pies
   const shG=new T.Mesh(new T.CircleGeometry(1,24).rotateX(-Math.PI/2), new T.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.22, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-5, polygonOffsetUnits:-10}));
   shG.scale.set(0.55,1,0.42); root.add(shG); shG.position.set(0.12,0.01,0);
-  scene.add(root, bones);
-  G={root, pelvis, torso, sh, arms, hands, hinge, club, shaft, grip, headM, J, B, bones, swing:null, lh:false, clubKey:"driver", ball:null};
+  // bolsa de palos (de pie, junto al golfista): otro espacio de marca
+  const bag=new T.Group(), bagBody=new T.Mesh(new T.CylinderGeometry(0.13,0.115,0.86,14), M(0xf2f2ef)); bagBody.position.y=0.5; bag.add(bagBody);
+  const rim=new T.Mesh(new T.TorusGeometry(0.13,0.018,6,16), M(0x1d1f22)); rim.rotation.x=Math.PI/2; rim.position.y=0.93; bag.add(rim);
+  const base=new T.Mesh(new T.CylinderGeometry(0.12,0.12,0.06,14), M(0x1d1f22)); base.position.y=0.1; bag.add(base);
+  for(let i=0;i<5;i++){ const a=i/5*Math.PI*2, hd=new T.Mesh(new T.BoxGeometry(0.06,0.05,0.085), mat.head); hd.position.set(Math.cos(a)*0.06,1.0+(i%2)*0.04,Math.sin(a)*0.06); hd.rotation.y=a; bag.add(hd);
+    const sf=new T.Mesh(new T.CylinderGeometry(0.006,0.006,0.12,5), mat.shaft); sf.position.set(Math.cos(a)*0.06,0.95,Math.sin(a)*0.06); bag.add(sf); }
+  const legG=new T.CylinderGeometry(0.009,0.009,0.62,5); for(const sd of [-1,1]){ const lg=new T.Mesh(legG, mat.shaft); lg.position.set(0.12,0.3,sd*0.07); lg.rotation.z=0.32; bag.add(lg); }
+  const bagLogo=new T.Mesh(new T.PlaneGeometry(0.2,0.1), new T.MeshBasicMaterial({transparent:true, side:DS, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-4}));
+  bagLogo.position.set(0.133,0.6,0); bagLogo.rotation.y=Math.PI/2; bagLogo.visible=false; bag.add(bagLogo);
+  const bagLogo2=new T.Mesh(bagLogo.geometry, bagLogo.material); bagLogo2.position.set(-0.133,0.6,0); bagLogo2.rotation.y=-Math.PI/2; bagLogo.add(bagLogo2); bagLogo2.position.set(0,0,-0.266); bagLogo2.rotation.y=Math.PI; bag.rotation.z=-0.14;
+  const bagRoot=new T.Group(); bagRoot.add(bag); scene.add(root, bones, bagRoot);
+  G={root, pelvis, torso, sh, arms, hands, hinge, club, shaft, grip, headM, J, B, bones, swing:null, lh:false, clubKey:"driver", ball:null, mat, capLogo, chestLogo, bag:bagRoot, bagBody, bagLogo, logoTex:{}};
+  if(pendingOutfit){ W3.setOutfit(pendingOutfit); pendingOutfit=null; }
 }
 let W_A, W_B, W_D, W_K, Q_UP, Q_T;
 function setBone(m,a,b){ W_D.subVectors(b,a); const L=W_D.length()||1e-4; m.position.copy(a); m.scale.set(1,L,1); Q_T.setFromUnitVectors(Q_UP,W_D.divideScalar(L)); m.quaternion.copy(Q_T); }
@@ -470,10 +498,10 @@ function swingPose(t, sw){
   const td=t-sw.B; if(td<sw.D){ const u=td/sw.D; return {phase:"down", ang:A*(1-Math.pow(u,2.1)), sh:shTop+(0.22-shTop)*sm(u), hip:hipTop+(0.5-hipTop)*sm(Math.min(1,u*1.25)), tilt:0.62}; }
   const v=eo((td-sw.D)/0.8); return {phase:"thru", ang:Fi*v, sh:0.22+(1.7-0.22)*v, hip:0.5+(1.15-0.5)*v, tilt:0.62-0.4*v}; }
 // coloca al golfista junto a la bola, mirando la línea, con el palo apoyado detrás de la bola
-const CLUB_L={driver:1.16, wood3:1.09, hybrid:1.02, iron5:0.965, iron7:0.94, iron9:0.915, wedge:0.90, gw:0.895, sw:0.89, lw:0.885};
+const CLUB_L={driver:1.16, wood3:1.09, hybrid:1.02, iron5:0.965, iron7:0.94, iron9:0.915, wedge:0.90, gw:0.895, sw:0.89, lw:0.885, putter:0.86};
 function placeGolfer(x,z,yaw){ if(!G) return; const L=CLUB_L[G.clubKey]||0.95, f=new T.Vector3(Math.sin(yaw),0,Math.cos(yaw)), right=new T.Vector3(-Math.cos(yaw),0,Math.sin(yaw));
   const ex=G.lh? right.clone().negate() : right.clone(), ey=new T.Vector3(0,1,0), ez=new T.Vector3().crossVectors(ex,ey);
-  const stand=0.5+L*0.24, fwdBall=G.clubKey==="driver"?0.12:G.clubKey==="wood3"||G.clubKey==="hybrid"?0.07:0.02;
+  const putt=G.clubKey==="putter", stand=putt?0.52:0.5+L*0.24, fwdBall=G.clubKey==="driver"?0.12:G.clubKey==="wood3"||G.clubKey==="hybrid"?0.07:putt?0.04:0.02;
   G.root.position.set(x,0,z).addScaledVector(ex,-stand).addScaledVector(f,-fwdBall);
   G.root.quaternion.setFromRotationMatrix(new T.Matrix4().makeBasis(ex,ey,ez)); G.root.scale.set(1,1,G.lh?-1:1);
   G.ball=new T.Vector3(x,0.02,z); G.swing=null; G.root.updateMatrixWorld(true);
@@ -481,12 +509,24 @@ function placeGolfer(x,z,yaw){ if(!G) return; const L=CLUB_L[G.clubKey]||0.95, f
   const inv=new T.Matrix4().copy(G.root.matrixWorld).invert(), bl=G.ball.clone().applyMatrix4(inv), dl=bl.sub(new T.Vector3(0.28,0.65,0)), len=dl.length(); dl.normalize();
   G.addrDir=[dl.x,dl.y,dl.z]; G.shaft.scale.set(1,len,1); G.shaft.position.set(0,-len/2,0);
   const big=G.clubKey==="driver"||G.clubKey==="wood3", hy=G.clubKey==="hybrid";
-  G.headM.scale.set(big?0.115:hy?0.09:0.075, big?0.06:0.045, big?0.11:hy?0.07:0.035); G.headM.position.set(big?0.045:0.03,-len+0.025,0);
-  golferPose({phase:"back",ang:0,sh:0,hip:0,tilt:0.62}); }
+  if(putt){ G.headM.scale.set(0.105,0.026,0.032); G.headM.position.set(0.035,-len+0.015,0); }
+  else { G.headM.scale.set(big?0.115:hy?0.09:0.075, big?0.06:0.045, big?0.11:hy?0.07:0.035); G.headM.position.set(big?0.045:0.03,-len+0.025,0); }
+  golferPose({phase:"back",ang:0,sh:0,hip:0,tilt:putt?0.72:0.62});
+  // la bolsa: detrás del golfista y un poco atrás de la línea, mirando a la cámara
+  G.bag.position.copy(G.root.position).addScaledVector(ex,-0.7).addScaledVector(f,0.75); { const d=f.clone().negate().addScaledVector(ex,0.45).normalize(); G.bag.rotation.y=Math.atan2(-d.z,d.x); }
+  G.capLogo.scale.x=G.chestLogo.scale.x=G.lh?-1:1; }
+// golpe de putt: péndulo corto de hombros (subida 0,55 s, bajada 0,25 s, acompañamiento corto); el impacto llega en t=0,8 s
+const PUTT_B=0.55, PUTT_D=0.25;
+function puttPose(t, amp){ const sm=x=>x<=0?0:x>=1?1:x*x*(3-2*x);
+  if(t<=0) return {phase:"back",ang:0,sh:0,hip:0,tilt:0.72};
+  if(t<PUTT_B){ const e=sm(t/PUTT_B); return {phase:"back",ang:amp*e,sh:-0.18*e*amp/18,hip:0,tilt:0.72}; }
+  if(t<PUTT_B+PUTT_D){ const u=(t-PUTT_B)/PUTT_D, e=1-u*u; return {phase:"down",ang:amp*e,sh:-0.18*e*amp/18,hip:0,tilt:0.72}; }
+  const v=sm(Math.min(1,(t-PUTT_B-PUTT_D)/0.45)); return {phase:"thru",ang:amp*0.9*v,sh:0.16*v*amp/18,hip:0,tilt:0.72}; }
 W3._dbg=(t)=>{ if(!G) return null; G.swing=null; golferPose(swingPose(t,{B:0.85,D:0.28,top:160,fin:170})); const inv=new T.Matrix4().copy(G.root.matrixWorld).invert(), L=o=>o.getWorldPosition(new T.Vector3()).applyMatrix4(inv), r=v=>[+v.x.toFixed(2),+v.y.toFixed(2),+v.z.toFixed(2)];
   const head=new T.Vector3(0,-G.shaft.scale.y,0); G.club.localToWorld(head); head.applyMatrix4(inv); return {hands:r(L(G.hands)), clubhead:r(head), shL:r(L(G.J.shL)), shR:r(L(G.J.shR))}; };
 W3._state=()=>({busy:W3.busy(), pending:!!(S.anim&&S.anim.pending), ball:[+ball.position.x.toFixed(2),+ball.position.y.toFixed(2),+ball.position.z.toFixed(2)], swing:!!(G&&G.swing), fx:FX.length});
-W3._fxStep=(dt)=>{ fxUpdate(dt); };   // pruebas
+W3._fxStep=(dt)=>{ fxUpdate(dt); };
+W3._gdbg=()=>{ const r=v=>[+v.x.toFixed(2),+v.y.toFixed(2),+v.z.toFixed(2)]; const hd=new T.Vector3(0,-G.shaft.scale.y,0); G.club.localToWorld(hd); return {ball:r(ball.position), root:r(G.root.position), hands:r(G.hands.getWorldPosition(new T.Vector3())), head:r(hd), cam:r(camera.position), vis:G.root.visible, ballVis:ball.visible, club:G.clubKey}; };   // pruebas
 W3._snap=()=>{ if(S.cam.tPos) S.cam.pos.copy(S.cam.tPos); if(S.cam.tLook) S.cam.look.copy(S.cam.tLook); };   // pruebas
 W3._pose=(t,sw)=>{ if(!G) return; G.swing=null; golferPose(swingPose(t,sw||{B:0.85,D:0.28,top:160,fin:170})); };   // pruebas
 W3.setGolfer=function(o){ if(!G) return; if(o.hand!=null) G.lh=o.hand==="L"; if(o.club) G.clubKey=o.club; if(S.address && !S.anim && !S.putt) placeGolfer(S.address.x,S.address.z,S.address.yaw); };
@@ -517,6 +557,7 @@ function fxUpdate(dt){ for(let k=FX.length-1;k>=0;k--){ const e=FX[k]; e.t+=dt; 
 // ---------------- cámara y animación ----------------
 W3.address=function(x,z,yaw,immediate){
   if(!W3.ok) return; S.anim=null; S.putt=null; S.fly=null; S.trail=[]; S.address={x,z,yaw};
+  if(G && G.prevClub){ G.clubKey=G.prevClub; G.prevClub=null; } if(G) G.putt=null;
   S.f={x:Math.sin(yaw),z:Math.cos(yaw)}; S.r={x:Math.cos(yaw),z:-Math.sin(yaw)};
   ball.position.set(x,BALL_R,z); ball.visible=true; placeGolfer(x,z,yaw);
   // detrás de la bola, un poco hacia el lado de la bola para que el golfista no tape el hoyo
@@ -562,8 +603,13 @@ W3.playPutts=function(o){ // o: {from:{x,z}, pin:{x,z}, n, onPutt, onHole, onEnd
       to={x:o.pin.x+ux*along-uz*side, z:o.pin.z+uz*along+ux*side}; }
     const dist=Math.hypot(to.x-cur.x,to.z-cur.z); segs.push({from:cur,to,dur:1.0+Math.sqrt(dist)*0.55,holed:last}); cur=to;
   }
-  S.anim=null; S.trail=[]; S.putt={segs, k:0, t0:clock.elapsedTime+0.6, pin:o.pin, onPutt:o.onPutt, onHole:o.onHole, onEnd:o.onEnd, started:false, done:false};
+  S.anim=null; S.trail=[]; S.putt={segs, k:0, t0:clock.elapsedTime+1.0, pin:o.pin, onPutt:o.onPutt, onHole:o.onHole, onEnd:o.onEnd, started:false, done:false};
+  puttAddress(S.putt);
 };
+// el golfista se pone sobre la bola de cada putt, con el putter, mirando la línea al hoyo
+function puttAddress(P){ const s=P.segs[P.k]; if(!G || !s) return; if(!G.prevClub) G.prevClub=G.clubKey; G.clubKey="putter";
+  const dx=P.pin.x-s.from.x, dz=P.pin.z-s.from.z, yaw=Math.atan2(dx,dz), d=Math.hypot(dx,dz);
+  placeGolfer(s.from.x,s.from.z,yaw); G.putt={t0:P.t0-PUTT_B-PUTT_D, amp:Math.min(30,9+Math.sqrt(s.dur*20)*2.2+d*0.25)}; }
 W3.skip=function(){ if(S.anim) S.anim.skip=true; if(S.putt) S.putt.skip=true; if(S.fly) S.fly.skip=true; };
 // Vuelo sobre el hoyo al empezar: de la salida al green, como en la TV
 W3.flyover=function(h,onEnd){ if(!W3.ok){ onEnd&&onEnd(); return; } S.fly={h, t0:clock.elapsedTime, dur:Math.min(6.5,3.2+h.len/170), onEnd, skip:false}; };
@@ -585,8 +631,14 @@ function update(dt){
   const now=clock.elapsedTime, C=S.cam, f=S.f, r=S.r;
   fxUpdate(dt);
   // golfista
-  if(G){ const vis=!S.putt && !S.fly && !!S.address; G.root.visible=vis; G.bones.visible=vis;
-    if(G.swing){ const sw=G.swing; let t=now-sw.t0; if(S.anim && S.anim.pending && S.anim.skip) t=sw.B+sw.D;
+  if(G){
+    // se ve en el address, en el swing y en los putts; no en el vuelo de presentación del hoyo,
+    // ni cuando la cámara pasa casi encima de él (se vería un muñeco gigante cortado)
+    let vis=!S.fly && !!S.address && !(S.putt && S.putt.skip);
+    if(vis && !G.putt){ W_A.copy(G.root.position); W_A.y=1.1; if(W_A.distanceTo(camera.position)<2.3) vis=false; }
+    G.root.visible=vis; G.bones.visible=vis; G.bag.visible=vis && !S.putt;
+    if(G.putt && S.putt){ golferPose(puttPose(now-G.putt.t0, G.putt.amp)); }
+    else if(G.swing){ const sw=G.swing; let t=now-sw.t0; if(S.anim && S.anim.pending && S.anim.skip) t=sw.B+sw.D;
       golferPose(swingPose(t,sw));
       if(!sw.down && t>=sw.B+sw.D*0.25){ sw.down=true; S.anim&&S.anim.o&&S.anim.o.onDown&&S.anim.o.onDown(); }
       if(!sw.hit && t>=sw.B+sw.D){ sw.hit=true; if(S.anim && S.anim.pending){ S.anim.pending=false; S.anim.t0=now; const o=S.anim.o; o.onImpact&&o.onImpact(); if(o.impact) W3.burst(S.address.x,S.address.z,o.impact); } }
@@ -612,9 +664,11 @@ function update(dt){
       const x=lerp(s.from.x,s.to.x,e), z=lerp(s.from.z,s.to.z,e);
       ball.position.set(x, BALL_R - (s.holed && u>=1 ? 0.08:0), z); ball.visible=!(s.holed && u>=1);
       const dx=P.pin.x-s.from.x, dz=P.pin.z-s.from.z, d=Math.hypot(dx,dz)||1;
-      C.tPos=new T.Vector3(s.from.x-dx/d*3.4, 1.05, s.from.z-dz/d*3.4); C.tLook=new T.Vector3(P.pin.x,0.1,P.pin.z); C.rate=2.5; C.lookRate=3;
+      // detrás de la bola, corrida al lado contrario del golfista: se ven él, la bola y la línea al hoyo
+      const sx=(G&&G.lh?-1:1)*(-dz/d)*0.45, sz=(G&&G.lh?-1:1)*(dx/d)*0.45;
+      C.tPos=new T.Vector3(s.from.x-dx/d*4.3+sx, 1.3, s.from.z-dz/d*4.3+sz); C.tLook=new T.Vector3(P.pin.x,0.1,P.pin.z); C.rate=2.5; C.lookRate=3;
       if(!P.cut){ P.cut=true; C.pos.copy(C.tPos); C.look.copy(C.tLook); }
-      if(u>=1){ if(s.holed && !P.holed){ P.holed=true; P.onHole&&P.onHole(); } P.k++; P.started=false; P.cut=false; P.t0=now+(P.skip?0:0.7); }
+      if(u>=1){ if(s.holed && !P.holed){ P.holed=true; P.onHole&&P.onHole(); } P.k++; P.started=false; P.cut=false; P.t0=now+(P.skip?0:1.25); if(!P.skip) puttAddress(P); }
     } else if(!P.done){ P.done=true; const cb=P.onEnd; S.putt=null; cb&&cb(); }
   }
   // vuelo de presentación del hoyo
@@ -624,6 +678,10 @@ function update(dt){
     C.tPos=new T.Vector3(p.x, hgt, p.z); C.tLook=new T.Vector3(e>0.8?h.pinX:q.x, 0, e>0.8?h.L:q.z); C.rate=3; C.lookRate=2.5;
     if(!F.started){ F.started=true; C.pos.copy(C.tPos); C.look.copy(C.tLook); }
     if(u>=1){ const cb=F.onEnd; S.fly=null; cb&&cb(); } }
+  // estudio del vestuario: de frente al golfista, con un vaivén lento para verlo en 3D
+  if(S.studio && G && S.address){ const e=new T.Vector3(1,0,0).applyQuaternion(G.root.quaternion).normalize(), fz=new T.Vector3(S.f.x,0,S.f.z), a=Math.sin((now-S.studio.t0)*0.45)*0.55;
+    const dir=e.clone().multiplyScalar(Math.cos(a)).addScaledVector(fz,Math.sin(a)*(G.lh?-1:1)), c=G.root.position.clone();
+    C.tPos=c.clone().addScaledVector(dir,2.7).add(new T.Vector3(0,1.25,0)).addScaledVector(fz,-0.35); C.tLook=c.clone().add(new T.Vector3(0,0.82,0)).addScaledVector(fz,-0.35); C.rate=2.2; C.lookRate=3; }
   treeU.uTime.value=now; treeU.uAmp.value=0.25+Math.min(8,Math.hypot(S.wind.x,S.wind.z))*0.12;
   if(waterMats.length && waterNormal){ waterNormal.offset.x=(now*0.012)%1; waterNormal.offset.y=(now*0.007)%1; }
   // cámara suave
@@ -632,7 +690,7 @@ function update(dt){
   camera.position.copy(C.pos); camera.lookAt(C.look); camera.updateMatrixWorld();
   sky.position.copy(camera.position);
   // bola y sombra con tamaño legible a distancia
-  const d=camera.position.distanceTo(ball.position), s=Math.max(1.4,d*0.21);
+  const d=camera.position.distanceTo(ball.position), s=Math.max(S.putt?2.2:1.4,d*0.21);
   ball.scale.setScalar(s); if(!S.putt) ball.position.y=Math.max(ball.position.y,BALL_R*s);
   shadow.position.set(ball.position.x,0.03,ball.position.z); const hgt=Math.max(0,ball.position.y-BALL_R*s);
   shadow.scale.setScalar(s*(1+hgt*0.02)); shadow.material.opacity=ball.visible?0.42*Math.exp(-hgt/22):0; shadow.visible=ball.visible;
