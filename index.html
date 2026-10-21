@@ -21,6 +21,7 @@
   --accent:#c99a12; --accent-ink:#1d1600; --deep:#0f2a22; --deep-ink:#eef4ef; --deep-muted:#a9bdb2;
   --rough:#cfdcc9; --fairway:#a9c79c; --green:#7fb56a;
   --good:#2e8b57; --warn:#b86e0a; --bad:#c0392b;
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a;
   --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
   color-scheme:light;
@@ -29,12 +30,12 @@
   --bg:#0b1713; --surface:#12231d; --ink:#e7efe9; --muted:#93a69c; --line:#24392f;
   --accent:#f2c230; --accent-ink:#1d1600; --deep:#061410; --deep-ink:#eef4ef; --deep-muted:#9db3a7;
   --rough:#16301f; --fairway:#21462c; --green:#2f6b3a;
-  --good:#4cc283; --warn:#f0a43a; --bad:#ef6b5c; color-scheme:dark}}
+  --good:#4cc283; --warn:#f0a43a; --bad:#ef6b5c; --c1:#3987e5; --c2:#d95926; --c3:#199e70; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0b1713; --surface:#12231d; --ink:#e7efe9; --muted:#93a69c; --line:#24392f;
   --accent:#f2c230; --accent-ink:#1d1600; --deep:#061410; --deep-ink:#eef4ef; --deep-muted:#9db3a7;
   --rough:#16301f; --fairway:#21462c; --green:#2f6b3a;
-  --good:#4cc283; --warn:#f0a43a; --bad:#ef6b5c; color-scheme:dark}
+  --good:#4cc283; --warn:#f0a43a; --bad:#ef6b5c; --c1:#3987e5; --c2:#d95926; --c3:#199e70; color-scheme:dark}
 *{box-sizing:border-box}
 html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);-webkit-tap-highlight-color:transparent;
@@ -295,6 +296,9 @@ section{display:flex;flex-direction:column;gap:10px}
 .tab[aria-selected="true"]{color:var(--ink);border-color:var(--accent)}
 .panel{display:flex;flex-direction:column;gap:10px;padding-top:12px}
 canvas.plot{width:100%;display:block;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.chartSeg{margin:0 0 8px}
+.rchart{margin:6px 0 2px}.rchart h4{margin:10px 0 4px;font-size:.82rem;color:var(--muted);font-weight:600}
+#rcDir{height:78px}#rcTempo{height:170px}#rcSpeed{height:40px}
 #plot{height:160px}
 #range{height:330px;cursor:pointer}
 #side{height:170px;margin-top:10px}
@@ -558,8 +562,9 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button class="tab" role="tab" data-tab="practice" aria-selected="false">Práctica</button>
     </div>
     <div class="panel" data-panel="field">
+      <div class="seg chartSeg" id="fieldScope" role="group" aria-label="Qué tiros"><button data-s="club" aria-pressed="true">Este palo</button><button data-s="all" aria-pressed="false">Todos los palos</button></div>
       <canvas class="plot" id="range" aria-label="Vista desde arriba con la caída de tus tiros"></canvas>
-      <div class="legend"><span><i style="background:var(--accent)"></i>Último tiro</span><span><i style="background:var(--muted)"></i>Tiros anteriores de este palo</span><span><i class="ring"></i>Promedio y dispersión</span></div>
+      <div class="legend" id="fieldLegend"><span><i style="background:var(--accent)"></i>Último tiro</span><span><i style="background:var(--muted)"></i>Tiros anteriores de este palo</span><span><i class="ring"></i>Promedio y dispersión</span></div>
       <p class="note" id="rangeTip">Toca un tiro para ver sus datos.</p>
       <canvas class="plot" id="side" aria-label="Vista de lado: altura del vuelo según la distancia"></canvas>
     </div>
@@ -800,16 +805,16 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.21"></script>
-<script src="js/courses.js?v=0.21"></script>
-<script src="js/wardrobe.js?v=0.21"></script>
-<script src="js/world3d.js?v=0.21"></script>
-<script src="js/sound.js?v=0.21"></script>
-<script src="js/camera.js?v=0.21"></script>
-<script src="js/online-config.js?v=0.21"></script>
-<script src="js/online.js?v=0.21"></script>
-<script src="js/vstore.js?v=0.21"></script>
-<script src="js/coach.js?v=0.21"></script>
-<script src="js/app.js?v=0.21"></script>
+<script src="js/engine.js?v=0.22"></script>
+<script src="js/courses.js?v=0.22"></script>
+<script src="js/wardrobe.js?v=0.22"></script>
+<script src="js/world3d.js?v=0.22"></script>
+<script src="js/sound.js?v=0.22"></script>
+<script src="js/camera.js?v=0.22"></script>
+<script src="js/online-config.js?v=0.22"></script>
+<script src="js/online.js?v=0.22"></script>
+<script src="js/vstore.js?v=0.22"></script>
+<script src="js/coach.js?v=0.22"></script>
+<script src="js/app.js?v=0.22"></script>
 </body>
 </html>

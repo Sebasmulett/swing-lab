@@ -82,7 +82,7 @@ function paintHole(ctx,B,sx,sz,W,P,shadowsOf){
   if(h.fairSamples.length || h.swales.length){
     const use=m=>{ ctx.drawImage(m,0,0); m.width=m.height=1; maskPool.push(m); };
     P(); use(maskCanvas(B,sx,sz,mc=>fwShape(mc,2.6),mc=>{ mc.fillStyle="#6d9e44"; mc.fillRect(B.x0,B.z0,B.x1-B.x0,B.z1-B.z0); }));
-    use(maskCanvas(B,sx,sz,mc=>fwShape(mc,0),mc=>{ stripes(mc,B,12,"#86be5a","#76ad4c"); mc.globalCompositeOperation="source-atop"; variation(mc,B,6,0.1,9); })); W();
+    use(maskCanvas(B,sx,sz,mc=>fwShape(mc,0),mc=>{ stripes(mc,B,12,"#8cc45e","#71a948"); mc.globalCompositeOperation="source-atop"; variation(mc,B,6,0.08,9); })); W();
     for(const e of h.swales){ const g=ctx.createRadialGradient(e.x,e.z,0,e.x,e.z,Math.max(e.rx,e.rz)); g.addColorStop(0,"rgba(30,60,15,0.22)"); g.addColorStop(1,"rgba(30,60,15,0)"); ctx.fillStyle=g; ellPath(ctx,e); ctx.fill(); }
   }
   // agua: orilla y lámina
@@ -107,7 +107,7 @@ function paintHole(ctx,B,sx,sz,W,P,shadowsOf){
   // bunkers (los pot bunkers con borde de tepes)
   for(const b of h.bunkers){ ctx.fillStyle=b.pot?"#4c5a2d":"#8f7d4f"; ellPath(ctx,b,b.pot?1.1:0.7); ctx.fill();
     ctx.save(); ellPath(ctx,b); ctx.clip(); const R=Math.max(b.rx,b.rz); ctx.fillStyle="#e2cf9c"; ctx.fillRect(b.x-R,b.z-R,R*2,R*2);
-    ctx.strokeStyle="rgba(170,145,95,0.35)"; ctx.lineWidth=0.18; for(let k=-R;k<R;k+=0.8){ ctx.beginPath(); ctx.moveTo(b.x-R,b.z+k); ctx.lineTo(b.x+R,b.z+k+1.5); ctx.stroke(); }
+    ctx.strokeStyle="rgba(170,145,95,0.18)"; ctx.lineWidth=0.08; for(let k=-R;k<R;k+=0.45){ ctx.beginPath(); ctx.moveTo(b.x-R,b.z+k); ctx.lineTo(b.x+R,b.z+k+1.5); ctx.stroke(); }
     const g=ctx.createRadialGradient(b.x,b.z,R*0.3,b.x,b.z,R); g.addColorStop(0,"rgba(0,0,0,0)"); g.addColorStop(1,b.pot?"rgba(60,45,20,0.55)":"rgba(90,70,30,0.35)"); ctx.fillStyle=g; ctx.fillRect(b.x-R,b.z-R,R*2,R*2); ctx.restore(); }
   // green
   ctx.fillStyle="#76b24d"; ellPath(ctx,G,3); ctx.fill();
@@ -147,8 +147,29 @@ function paint(B){
   const tex=new T.CanvasTexture(c); tex.anisotropy=Math.min(8,R.capabilities.getMaxAnisotropy()); tex.generateMipmaps=true; tex.minFilter=T.LinearMipmapLinearFilter;
   return tex;
 }
+// Textura de detalle del pasto: briznas y grumos finos que se repiten cada ~1,6 m y se multiplican sobre el dibujo del hoyo.
+// De cerca el pasto deja de verse liso; de lejos el mipmap la promedia a gris medio y desaparece sola (no pesa nada).
+let grassTex=null;
+function grassDetail(){ if(grassTex) return grassTex; const N=256, c=document.createElement("canvas"); c.width=c.height=N; const x=c.getContext("2d"), im=x.createImageData(N,N), d=im.data, Rn=SL.rng(77);
+  const fine=new Float32Array(N*N), coarse=new Float32Array(N*N);
+  for(let i=0;i<N*N;i++){ fine[i]=Rn(); }
+  // briznas: trazos cortos más claros y más oscuros
+  for(let k=0;k<5200;k++){ const x0=Rn()*N, y0=Rn()*N, len=2+Rn()*5, a=-Math.PI/2+(Rn()-0.5)*0.9, v=Rn()<0.5?0.55:-0.45;
+    for(let t=0;t<len;t++){ const xi=((x0+Math.cos(a)*t)%N+N)%N|0, yi=((y0+Math.sin(a)*t)%N+N)%N|0; fine[yi*N+xi]=Math.max(0,Math.min(1,0.5+v*(1-t/len*0.5))); } }
+  // grumos: ruido de valor suave que se repite (el canal verde lleva la escala gruesa)
+  const G=16, cell=N/G, g=[]; for(let i=0;i<G*G;i++) g.push(Rn());
+  const at=(i,j)=>g[((j%G+G)%G)*G+((i%G+G)%G)], sm=t=>t*t*(3-2*t);
+  for(let y=0;y<N;y++) for(let xx=0;xx<N;xx++){ const fx=xx/cell, fy=y/cell, i=Math.floor(fx), j=Math.floor(fy), u=sm(fx-i), v=sm(fy-j);
+    coarse[y*N+xx]=at(i,j)*(1-u)*(1-v)+at(i+1,j)*u*(1-v)+at(i,j+1)*(1-u)*v+at(i+1,j+1)*u*v; }
+  for(let i=0;i<N*N;i++){ d[i*4]=fine[i]*255; d[i*4+1]=coarse[i]*255; d[i*4+2]=128; d[i*4+3]=255; }
+  x.putImageData(im,0,0); grassTex=new T.CanvasTexture(c); grassTex.wrapS=grassTex.wrapT=T.RepeatWrapping; grassTex.anisotropy=Math.min(8,R.capabilities.getMaxAnisotropy()); return grassTex; }
+function withGrass(mat, sx, sz, k){ const tex=grassDetail(), rep=new T.Vector2(sx/1.6, sz/1.6), str=k??1;
+  mat.onBeforeCompile=sh=>{ sh.uniforms.gDet={value:tex}; sh.uniforms.gRep={value:rep}; sh.uniforms.gStr={value:str};
+    sh.fragmentShader=sh.fragmentShader.replace("#include <common>","#include <common>\nuniform sampler2D gDet; uniform vec2 gRep; uniform float gStr;")
+      .replace("#include <map_fragment>","#include <map_fragment>\n  { float gf=texture2D(gDet,vUv*gRep).r; float gc=texture2D(gDet,vUv*gRep*0.19).g; diffuseColor.rgb*=mix(1.0,(0.8+0.4*gf)*(0.9+0.2*gc),gStr); }"); };
+  mat.customProgramCacheKey=()=>"grass"; return mat; }
 function groundPlane(B, tex, y, offset, transparent){
-  const m=new T.Mesh(new T.PlaneGeometry(B.x1-B.x0,B.z1-B.z0), new T.MeshLambertMaterial({map:tex, transparent:!!transparent, polygonOffset:true, polygonOffsetFactor:offset, polygonOffsetUnits:offset*2}));
+  const m=new T.Mesh(new T.PlaneGeometry(B.x1-B.x0,B.z1-B.z0), withGrass(new T.MeshLambertMaterial({map:tex, transparent:!!transparent, polygonOffset:true, polygonOffsetFactor:offset, polygonOffsetUnits:offset*2}),B.x1-B.x0,B.z1-B.z0));
   m.rotation.x=-Math.PI/2; m.position.set((B.x0+B.x1)/2,y,(B.z0+B.z1)/2); return m;
 }
 
@@ -752,15 +773,23 @@ W3.init=function(cv){
     hm.scale.set(200+Rn()*300,35+Rn()*85,200+Rn()*300); hm.position.set(Math.sin(a)*rad,-15,Math.cos(a)*rad); hm.userData={s:hm.scale.clone(), p:hm.position.clone(), a, r:Rn()}; scene.add(hm); hills.push(hm); }
   hillMatRef=hillMat;
   // cordillera lejana (solo en los campos de montaña, como la sabana de Bogotá)
-  const mtnMat=new T.MeshLambertMaterial({color:0x6f8ea0}); mtns=new T.Group();
-  for(let i=0;i<30;i++){ const a=i/30*Math.PI*2+Rn()*0.15, rad=2500+Rn()*300, m=new T.Mesh(new T.ConeGeometry(1,1,7),mtnMat);
-    m.scale.set(420+Rn()*420,380+Rn()*560,420+Rn()*420); m.position.set(Math.sin(a)*rad,m.scale.y/2-40,Math.cos(a)*rad); m.rotation.y=Rn()*3; mtns.add(m); }
+  // cerros con laderas irregulares (no conos): media esfera deformada con ruido, verde abajo y azulada arriba (lejanía)
+  const mtnMat=new T.MeshLambertMaterial({vertexColors:true}); mtns=new T.Group();
+  const mtnGeo=k=>{ const g=new T.SphereGeometry(1,28,12,0,Math.PI*2,0,Math.PI/2), P=g.attributes.position, col=[], Rm=SL.rng(900+k), ph=[Rm()*6,Rm()*6,Rm()*6];
+    const lo=new T.Color(0x2c4a28), hi=new T.Color(0x4f6878), tmp=new T.Color();
+    for(let i=0;i<P.count;i++){ const x=P.getX(i), y=P.getY(i), z=P.getZ(i), a=Math.atan2(z,x);
+      const n=1+0.16*Math.sin(a*3+ph[0])+0.09*Math.sin(a*7+ph[1])+0.05*Math.sin(a*13+ph[2]), yy=y*(0.85+0.3*Math.abs(Math.sin(a*2+ph[2])));
+      P.setXYZ(i,x*n,Math.pow(Math.max(0,yy),1.25),z*n); tmp.copy(lo).lerp(hi,Math.min(1,y*1.1)); col.push(tmp.r,tmp.g,tmp.b); }
+    g.setAttribute("color",new T.Float32BufferAttribute(col,3)); g.computeVertexNormals(); return g; };
+  const MG=[0,1,2,3].map(mtnGeo);
+  for(let i=0;i<34;i++){ const a=i/34*Math.PI*2+Rn()*0.12, rad=2350+Rn()*450, m=new T.Mesh(MG[i%4],mtnMat);
+    m.scale.set(520+Rn()*420,230+Rn()*330,320+Rn()*260); m.position.set(Math.sin(a)*rad,-30,Math.cos(a)*rad); m.rotation.y=-a+Math.PI/2+(Rn()-0.5)*0.6; mtns.add(m); }
   mtns.visible=false; scene.add(mtns);
   // suelo base con textura repetida
   const bc=document.createElement("canvas"); bc.width=bc.height=256; const bx=bc.getContext("2d"); bx.fillStyle="#5a893a"; bx.fillRect(0,0,256,256);
   for(let k=0;k<5000;k++){ bx.fillStyle=["#4a7a2f","#6a9b45","#557f36","#79a952"][k%4]; bx.globalAlpha=0.5; bx.fillRect(Math.random()*256|0,Math.random()*256|0,2,2); }
   const bt=new T.CanvasTexture(bc); bt.wrapS=bt.wrapT=T.RepeatWrapping; bt.repeat.set(700,700); bt.anisotropy=4;
-  const base=new T.Mesh(new T.PlaneGeometry(8000,8000),new T.MeshLambertMaterial({map:bt})); base.rotation.x=-Math.PI/2; base.position.y=-0.15; scene.add(base);
+  const base=new T.Mesh(new T.PlaneGeometry(8000,8000),withGrass(new T.MeshLambertMaterial({map:bt}),8000,8000,0.8)); base.rotation.x=-Math.PI/2; base.position.y=-0.15; scene.add(base);
   // bola, sombra y trazador
   ball=new T.Mesh(new T.SphereGeometry(BALL_R,18,12),new T.MeshPhongMaterial({color:0xffffff, emissive:0x333333, shininess:70})); scene.add(ball);
   shadow=new T.Mesh(new T.CircleGeometry(0.03,16).rotateX(-Math.PI/2),new T.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.4, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-6, polygonOffsetUnits:-12})); scene.add(shadow);

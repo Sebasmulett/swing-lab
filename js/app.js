@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.21";
+const VERSION="0.22";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -309,7 +309,7 @@ function setupHole(announce){
   if(has3D){ if(builtHole!==key || announce){ World.setScenery(CUR.scenery); World.setHole(HOLES[course.hole]); builtHole=key; }
     World.setWind(course.wind[course.hole]); World.setLines(course.lines); World.setAim(aimPoint()); World.address(course.ball.x,course.ball.z,aimYaw(),true);
     // al empezar un hoyo: vuelo de presentación de la salida al green (toca para saltarlo)
-    if(announce && course.strokes===0 && !course.holed){ const b=course.ball; World.flyover(HOLES[course.hole],()=>{ World.address(b.x,b.z,aimYaw(),false); renderAim(); }); } }
+    if(announce && course.strokes===0 && !course.holed){ const b=course.ball; World.flyover(HOLES[course.hole],()=>{ World.address(b.x,b.z,aimYaw(),true); renderAim(); }); } }
   renderAim();
   suggestClub(); renderHud(); drawMini(); camLayer(true);
   if(announce){ const h=HOLES[course.hole], w=course.wind[course.hole];
@@ -1003,7 +1003,40 @@ function canvasFor(id){ const cv=$(id); if(!cv || cv.closest("[hidden]")) return
   cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext("2d"); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,W,H); return {cv,c,W,H}; }
 const fieldShots=()=>{ const cur=shown && shown.club===club?shown:null; const prev=history.filter(h=>h.club===club && (!cur || h.id!==cur.id)).slice(0,20); return {cur, prev, all:cur?[cur,...prev]:prev}; };
 let rangeHits=[], rangePick=null;
+let fieldAll=store.get("sl22_fieldAll",false);
+document.querySelectorAll("#fieldScope button").forEach(b=>b.addEventListener("click",()=>{ fieldAll=b.dataset.s==="all"; store.set("sl22_fieldAll",fieldAll); rangePick=null; drawField(); }));
+// dispersión de cada palo: su promedio y su elipse de una desviación, con el nombre del palo al lado (sin depender del color)
+function fieldClubs(){ const by={}; for(const h of history){ if(h.sim||h.example) continue; (by[h.club]=by[h.club]||[]).push(h); }
+  return Object.entries(by).filter(([k,a])=>a.length>=2 && CLUBS[k]).map(([k,a])=>{ const d=a.slice(0,20).map(derive), n=d.length, mT=d.reduce((x,y)=>x+y.total,0)/n, mL=d.reduce((x,y)=>x+y.lat,0)/n;
+    return {k, n, hs:a.slice(0,20), d, mT, mL, sT:Math.sqrt(d.reduce((x,y)=>x+(y.total-mT)**2,0)/n), sL:Math.sqrt(d.reduce((x,y)=>x+(y.lat-mL)**2,0)/n)}; }).sort((a,b)=>b.mT-a.mT); }
+function drawFieldAll(g){ const {c,W,H}=g, ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line"), surf=css("--surface");
+  c.fillStyle=css("--rough"); c.fillRect(0,0,W,H); const rows=fieldClubs(); rangeHits=[];
+  if(!rows.length){ c.fillStyle=mut; c.font="12px "+css("--body"); c.textAlign="center"; c.fillText("Con 2 tiros o más de un palo verás su dispersión aquí",W/2,H/2); return; }
+  const maxD=Math.max(120,...rows.map(r=>r.mT+r.sT*1.5))*1.1, tee={x:W/2,y:H-20}, sc=(H-40)/maxD, maxLat=Math.max(15,...rows.map(r=>Math.abs(r.mL)+r.sL*1.3))*1.15, ex=Math.max(1,Math.min(3,(W/2-60)/maxLat/sc)), sx=sc*ex;
+  const X=lat=>Math.max(6,Math.min(W-6,tee.x+lat*sx)), Y=d=>tee.y-d*sc;
+  const fw=18; c.save(); c.beginPath(); c.moveTo(X(-5),tee.y+12); c.lineTo(X(5),tee.y+12); c.lineTo(X(fw),Y(maxD*0.6)); c.lineTo(X(fw+4),0); c.lineTo(X(-fw-4),0); c.lineTo(X(-fw),Y(maxD*0.6)); c.closePath(); c.fillStyle=css("--fairway"); c.fill(); c.restore();
+  const um=S.dist==="yd"?0.9144:1, ul=S.dist==="yd"?" yd":" m", step=maxD/um>180?50:25; c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="left";
+  for(let dd=step; dd*um<maxD; dd+=step){ const R=dd*um*sc; c.beginPath(); c.ellipse(tee.x,tee.y,R*ex,R,0,-Math.PI*0.78,-Math.PI*0.22); c.stroke(); const lx=tee.x+R*ex*Math.cos(-Math.PI*0.78), ly=tee.y+R*Math.sin(-Math.PI*0.78); if(ly>10) c.fillText(dd+ul,Math.max(4,lx-2),ly-3); }
+  if(ex>1.15){ c.textAlign="right"; c.fillText(`ancho ×${ex.toFixed(1)}`,W-8,14); }
+  // tiros sueltos (pequeños, recesivos) y luego las elipses y etiquetas por palo
+  for(const r of rows) r.hs.forEach((h,i)=>{ const dv=r.d[i], x=X(dv.lat), y=Y(dv.total), on=r.k===club; c.fillStyle=on?acc:mut; c.globalAlpha=on?0.85:0.45; c.beginPath(); c.arc(x,y,on?4:3,0,Math.PI*2); c.fill(); c.globalAlpha=1; rangeHits.push({h,x,y,dv}); });
+  const placed=[];
+  for(const r of rows){ const on=r.k===club, cx=X(r.mL), cy=Y(r.mT), rx=Math.max(5,r.sL*sx), ry=Math.max(5,r.sT*sc);
+    c.save(); c.strokeStyle=on?acc:ink; c.globalAlpha=on?1:0.6; c.lineWidth=on?2:1.25; c.beginPath(); c.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); c.stroke(); c.globalAlpha=on?0.14:0.05; c.fillStyle=on?acc:ink; c.fill(); c.restore();
+    c.fillStyle=on?acc:ink; c.strokeStyle=surf; c.lineWidth=2; c.beginPath(); c.arc(cx,cy,on?5:4,0,Math.PI*2); c.fill(); c.stroke();
+    // etiqueta: a la derecha de la elipse, o a la izquierda si choca con otra
+    c.font=(on?"700 ":"600 ")+"11px "+css("--body"); const txt=`${CLUBS[r.k].name} · ${fmtDist(r.mT)}`, tw=c.measureText(txt).width;
+    let side=cx<W*0.62?1:-1, lx=side>0?cx+rx+6:cx-rx-6-tw, ly=cy+4; const hit=(x0,y0)=>placed.some(p=>Math.abs(p.y-y0)<13 && x0<p.x+p.w && x0+tw>p.x);
+    if(hit(lx,ly)){ side=-side; lx=side>0?cx+rx+6:cx-rx-6-tw; } if(hit(lx,ly)) ly+=13; lx=Math.max(4,Math.min(W-4-tw,lx));
+    c.fillStyle=surf; c.globalAlpha=0.72; c.fillRect(lx-3,ly-11,tw+6,15); c.globalAlpha=1; c.fillStyle=ink; c.textAlign="left"; c.fillText(txt,lx,ly); placed.push({x:lx,y:ly,w:tw}); }
+  c.fillStyle=ink; c.beginPath(); c.arc(tee.x,tee.y,3,0,Math.PI*2); c.fill();
+  const pk=rangePick && rangeHits.find(r=>r.h.id===rangePick); if(pk){ c.strokeStyle=ink; c.lineWidth=2; c.beginPath(); c.arc(pk.x,pk.y,8,0,Math.PI*2); c.stroke(); }
+}
 function drawField(){
+  document.querySelectorAll("#fieldScope button").forEach(b=>b.setAttribute("aria-pressed",String((b.dataset.s==="all")===fieldAll)));
+  { const lg=$("fieldLegend"); if(lg) lg.innerHTML=fieldAll?`<span><i class="ring"></i>Cada palo: promedio y dispersión (1 desviación)</span><span><i style="background:var(--accent)"></i>${CLUBS[club].name}</span><span><i style="background:var(--muted)"></i>Tiros</span>`
+    :`<span><i style="background:var(--accent)"></i>Último tiro</span><span><i style="background:var(--muted)"></i>Tiros anteriores de este palo</span><span><i class="ring"></i>Promedio y dispersión</span>`; }
+  if(fieldAll){ const g=canvasFor("range"); if(g) drawFieldAll(g); return; }
   const g=canvasFor("range"); if(!g) return; const {c,W,H}=g;
   const ink=css("--ink"), mut=css("--muted"), acc=css("--accent"), line=css("--line"), surf=css("--surface");
   c.fillStyle=css("--rough"); c.fillRect(0,0,W,H);
@@ -1028,7 +1061,9 @@ function drawField(){
     c.save(); c.setLineDash([5,4]); c.strokeStyle=ink; c.globalAlpha=0.55; c.lineWidth=1.5; c.beginPath(); c.ellipse(X(mL),Y(mT),Math.max(4,sL*sx),Math.max(4,sT*sc),0,0,Math.PI*2); c.stroke();
     c.globalAlpha=0.06; c.fillStyle=ink; c.fill(); c.restore();
     c.strokeStyle=ink; c.lineWidth=1.5; c.beginPath(); c.moveTo(X(mL)-5,Y(mT)); c.lineTo(X(mL)+5,Y(mT)); c.moveTo(X(mL),Y(mT)-5); c.lineTo(X(mL),Y(mT)+5); c.stroke();
-    const right=X(mL)<W*0.5, lx=right?X(mL)+Math.max(4,sL*sx)+8:X(mL)-Math.max(4,sL*sx)-8;
+    // la etiqueta del promedio va al lado contrario de la del último tiro si quedarían encima una de otra
+    let right=X(mL)<W*0.5; if(cur){ const cdv=derive(cur), cx=X(cdv.lat), cy=Y(cdv.total), curRight=cx<=W*0.6; if(Math.abs(cy-8-(Y(mT)+4))<30 && curRight===right) right=!right; }
+    const lx=right?X(mL)+Math.max(4,sL*sx)+8:X(mL)-Math.max(4,sL*sx)-8;
     c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign=right?"left":"right"; c.fillText(`prom. ${fmtDist(mT)}`, lx, Y(mT)+4);
     c.fillStyle=mut; c.font="11px "+css("--body"); c.fillText(`±${fmtDist(sT)} largo · ±${fmtDist(sL)} lado`, lx, Y(mT)+18); }
   // vuelos vistos desde arriba
@@ -1037,7 +1072,7 @@ function drawField(){
     c.beginPath(); P.fl.forEach((q,k)=>{ const x=X(q.x), y=Y(Math.hypot(q.x,q.z)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke();
     if(P.roll.length>1){ c.setLineDash([2,4]); c.beginPath(); P.roll.forEach((q,k)=>{ const x=X(q.x), y=Y(Math.hypot(q.x,q.z)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke(); }
     c.restore(); const dv=derive(h); return {x:X(dv.lat), y:Y(dv.total), dv}; };
-  prev.slice().reverse().forEach(h=>{ const p=trace(h,mut,1.2,0.45); c.fillStyle=mut; c.beginPath(); c.arc(p.x,p.y,3.5,0,Math.PI*2); c.fill(); rangeHits.push({h,...p}); });
+  prev.slice().reverse().forEach(h=>{ const p=trace(h,mut,1.2,0.45); c.fillStyle=mut; c.strokeStyle=surf; c.lineWidth=1.5; c.beginPath(); c.arc(p.x,p.y,4,0,Math.PI*2); c.fill(); c.stroke(); rangeHits.push({h,...p}); });
   c.fillStyle=ink; c.beginPath(); c.arc(tee.x,tee.y,3,0,Math.PI*2); c.fill();
   if(cur){ const p=trace(cur,acc,2.75,1); c.fillStyle=acc; c.strokeStyle=surf; c.lineWidth=2; c.beginPath(); c.arc(p.x,p.y,6.5,0,Math.PI*2); c.fill(); c.stroke(); rangeHits.push({h:cur,...p});
     c.fillStyle=ink; c.font="600 12px "+css("--body"); c.textAlign=p.x>W*0.6?"right":"left";
@@ -1065,8 +1100,9 @@ function drawSide(){
     if(P.roll.length>1){ c.setLineDash([2,4]); c.beginPath(); P.roll.forEach((q,k)=>{ const x=X(Math.hypot(q.x,q.z)), y=Y(Math.max(0,q.y)); k?c.lineTo(x,y):c.moveTo(x,y); }); c.stroke(); } c.restore(); };
   prev.slice().reverse().forEach(h=>arc(h,mut,1.2,0.4));
   const sel=(rangePick && all.find(h=>h.id===rangePick)) || cur;
-  if(sel){ arc(sel,acc,2.5,1); const dv=derive(sel), P=derivePts(sel); let ap=P.fl[0]; P.fl.forEach(q=>{ if(q.y>ap.y) ap=q; });
-    const ax=X(Math.hypot(ap.x,ap.z)), ay=Y(ap.y); c.fillStyle=acc; c.beginPath(); c.arc(ax,ay,4,0,Math.PI*2); c.fill();
+  if(sel){ { const P=derivePts(sel); c.save(); c.globalAlpha=0.1; c.fillStyle=acc; c.beginPath(); c.moveTo(X(0),Y(0)); P.fl.forEach(q=>c.lineTo(X(Math.hypot(q.x,q.z)),Y(q.y))); const e=P.fl[P.fl.length-1]; c.lineTo(X(Math.hypot(e.x,e.z)),Y(0)); c.closePath(); c.fill(); c.restore(); }
+    arc(sel,acc,2.5,1); const dv=derive(sel), P=derivePts(sel); let ap=P.fl[0]; P.fl.forEach(q=>{ if(q.y>ap.y) ap=q; });
+    const ax=X(Math.hypot(ap.x,ap.z)), ay=Y(ap.y); c.fillStyle=acc; c.strokeStyle=css("--surface"); c.lineWidth=2; c.beginPath(); c.arc(ax,ay,4.5,0,Math.PI*2); c.fill(); c.stroke();
     c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign="center"; c.fillText(`altura ${Math.round(dv.apex)} m`, ax, Math.max(12,ay-8));
     const lx=X(dv.carry); c.fillStyle=acc; c.beginPath(); c.arc(lx,Y(0),3.5,0,Math.PI*2); c.fill(); c.fillStyle=ink; c.textAlign=lx>W*0.8?"right":"center";
     c.fillText(`carry ${fmtDist(dv.carry)} · ${dv.launch.toFixed(0)}° de salida`, Math.min(lx,W-12), Y(0)-7); }
@@ -1084,7 +1120,7 @@ function drawTrend(){
   [lo+pad, (lo+hi)/2, hi-pad].forEach(y=>{ c.fillText(y.toFixed(0),L-4,Y(y)+4); });
   c.setLineDash([5,4]); c.strokeStyle=mut; c.beginPath(); c.moveTo(L,Y(m)); c.lineTo(W-R,Y(m)); c.stroke(); c.setLineDash([]);
   c.strokeStyle=ink; c.globalAlpha=0.75; c.lineWidth=2; c.beginPath(); v.forEach((y,i)=>i?c.lineTo(X(i),Y(y)):c.moveTo(X(i),Y(y))); c.stroke(); c.globalAlpha=1;
-  const bi=v.indexOf(Math.max(...v)); v.forEach((y,i)=>{ c.fillStyle=i===bi?acc:ink; c.beginPath(); c.arc(X(i),Y(y),i===bi||i===n-1?4.5:2.5,0,Math.PI*2); c.fill(); });
+  const bi=v.indexOf(Math.max(...v)); c.strokeStyle=css("--surface"); c.lineWidth=2; v.forEach((y,i)=>{ c.fillStyle=i===bi?acc:ink; c.beginPath(); c.arc(X(i),Y(y),i===bi||i===n-1?5:4,0,Math.PI*2); c.fill(); c.stroke(); });
   c.strokeStyle=css("--surface"); c.lineWidth=2; c.beginPath(); c.arc(X(n-1),Y(v[n-1]),4.5,0,Math.PI*2); c.stroke();
   c.fillStyle=ink; c.font="600 11px "+css("--body"); c.textAlign=X(bi)>W*0.7?"right":"left"; c.fillText(`mejor ${v[bi].toFixed(0)} ${u}`, X(bi)+(X(bi)>W*0.7?-8:8), Math.max(11,Y(v[bi])-6));
   c.fillStyle=mut; c.font="11px "+css("--body"); c.textAlign="left"; c.fillText(`prom. ${m.toFixed(0)} ±${sd.toFixed(0)} ${u}`, L+4, H-4); c.textAlign="right"; c.fillText(`${n} swings · último →`, W-R, H-4);
@@ -1550,13 +1586,49 @@ function renderReal(){ const sec=document.querySelector('[data-for="real"]'); if
     return `<button class="pcard${r.id===realSel?" on":""}" data-id="${r.id}"><b>${escH(r.course)}</b><span>${fmtWhen(r.at)}</span><small>${hs} hoyos · ${n} golpes</small></button>`; }).join("");
   $("realList").querySelectorAll(".pcard").forEach(b=>b.onclick=()=>{ realSel=+b.dataset.id; renderReal(); });
   const show=R && R.swings.length>=3 ? R : realRounds.find(r=>r.id===realSel) || (R?null:realRounds[0]);
-  $("realReport").innerHTML=show?realReportHtml(show, show===R):"";
+  $("realReport").innerHTML=show?realReportHtml(show, show===R):""; if(show) drawRealCharts(show);
   if(show){ $("realReport").querySelectorAll(".rshot").forEach(b=>b.onclick=()=>{ const x=show.swings.find(s=>s.id===+b.dataset.id); if(x&&x.video) openReview(x.id); });
     const pr=$("realPrac"); if(pr) pr.onclick=()=>{ startPractice(pr.dataset.f, 10); };
     const del=$("realDel"); if(del) del.onclick=()=>{ if(del.dataset.sure){ realRounds=realRounds.filter(r=>r.id!==show.id); realSel=null; realSave(); SL.VStore&&SL.VStore.prune(keepVideoIds()); renderReal(); } else { del.dataset.sure="1"; del.textContent="¿Seguro? Toca otra vez"; } };
   }
 }
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+const rangeBase=R=>history.filter(h=>!h.sim && !h.example && h.ctx!=="real" && h.at<R.at && R.at-h.at<120*864e5);
+function realSpeedRows(R){ const sw=R.swings.filter(w=>!w.prac), base=rangeBase(R);
+  return SL.CLUB_ORDER.filter(k=>sw.some(w=>w.club===k)).map(k=>{ const a=sw.filter(w=>w.club===k), b=base.filter(h=>h.club===k);
+    return {k, real:mean(a.map(w=>toUnit(w.ms))), range:b.length>=2?mean(b.map(h=>toUnit(derive(h).ms))):null, n:a.length}; }).reverse(); }
+// gráficas del informe de la ronda (en canvas, con los tokens del tema)
+function drawRealCharts(R){ const sw=R.swings.filter(w=>!w.prac), ink=css("--ink"), mut=css("--muted"), line=css("--line"), surf=css("--surface"), acc=css("--accent"), F=css("--body");
+  // 1) dirección: barra 100% con los tres resultados; nombre y cuántos debajo de cada tramo
+  { const g=canvasFor("rcDir"); if(g){ const {c,W,H}=g, t=sw.filter(w=>w.dir), cats=[["L","Izquierda",css("--c1")],["C","Al objetivo",css("--good")],["R","Derecha",css("--c2")]];
+    const n=t.length, L=12, Rr=12, bw=W-L-Rr, y=14, bh=20; let x=L;
+    cats.forEach(([k,name,col],i)=>{ const m=t.filter(w=>w.dir===k).length; if(!m) return; const w=bw*m/n, gap=x>L?2:0;
+      c.fillStyle=col; c.beginPath(); const rad=[x===L?4:0, x+w>=L+bw-0.5?4:0, x+w>=L+bw-0.5?4:0, x===L?4:0]; if(c.roundRect) c.roundRect(x+gap,y,w-gap,bh,rad); else c.rect(x+gap,y,w-gap,bh); c.fill();
+      c.fillStyle=ink; c.font="600 12px "+F; c.textAlign=w<70?(i===0?"left":i===2?"right":"center"):"center"; const tx=w<70?(i===0?x:i===2?x+w:x+w/2):x+w/2;
+      c.fillText(`${Math.round(m/n*100)}%`, tx, y+bh+17); c.fillStyle=mut; c.font="11px "+F; c.fillText(`${name} · ${m}`, tx, y+bh+31); x+=w; }); } }
+  // 2) tempo de cada golpe, con la banda de tu range y la zona ideal
+  { const g=canvasFor("rcTempo"); if(g){ const {c,W,H}=g, pts=sw.filter(w=>w.ratio), base=rangeBase(R).filter(h=>h.ratio).map(h=>h.ratio), n=pts.length;
+    const bm=mean(base), bs=base.length>=3?Math.sqrt(base.reduce((a,b)=>a+(b-bm)**2,0)/base.length):null;
+    const vals=pts.map(w=>w.ratio).concat(bm?[bm-(bs||0),bm+(bs||0)]:[]).concat([2.7,3.3]); let lo=Math.min(...vals)-0.2, hi=Math.max(...vals)+0.2;
+    const Lp=32, Rp=12, T=10, B=22, X=i=>Lp+(n===1?0.5:i/(n-1))*(W-Lp-Rp), Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+    c.fillStyle=css("--good"); c.globalAlpha=0.12; c.fillRect(Lp,Y(3.3),W-Lp-Rp,Y(2.7)-Y(3.3)); c.globalAlpha=1;
+    if(bm && bs){ c.fillStyle=line; c.globalAlpha=0.7; c.fillRect(Lp,Y(bm+bs),W-Lp-Rp,Math.max(2,Y(bm-bs)-Y(bm+bs))); c.globalAlpha=1; c.fillStyle=mut; c.font="11px "+F; c.textAlign="right"; c.fillText(`range ${bm.toFixed(1)}:1`,W-Rp-2,Y(bm+bs)-3); }
+    c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="11px "+F; c.textAlign="right";
+    for(let v=Math.ceil(lo*2)/2; v<=hi; v+=0.5){ c.beginPath(); c.moveTo(Lp,Y(v)); c.lineTo(W-Rp,Y(v)); c.stroke(); c.fillText(v.toFixed(1),Lp-4,Y(v)+4); }
+    // hoyos en el eje x
+    c.textAlign="center"; let lastH=null; pts.forEach((w,i)=>{ if(w.hole!==lastH){ c.fillStyle=mut; c.fillText(`H${w.hole}`,X(i),H-6); lastH=w.hole; } });
+    c.strokeStyle=ink; c.globalAlpha=0.5; c.lineWidth=2; c.lineJoin="round"; c.beginPath(); pts.forEach((w,i)=>i?c.lineTo(X(i),Y(w.ratio)):c.moveTo(X(i),Y(w.ratio))); c.stroke(); c.globalAlpha=1;
+    pts.forEach((w,i)=>{ const bad=w.q==="b"; c.beginPath(); c.arc(X(i),Y(w.ratio),4.5,0,Math.PI*2); if(bad){ c.fillStyle=surf; c.fill(); c.strokeStyle=ink; c.lineWidth=2; c.stroke(); } else { c.fillStyle=ink; c.fill(); c.strokeStyle=surf; c.lineWidth=2; c.stroke(); } }); } }
+  // 3) velocidad por palo: range (aro) contra cancha (punto), unidos por una línea
+  { const rows=realSpeedRows(R), cv=$("rcSpeed"); if(cv && rows.length){ const rowH=30; cv.style.height=(rows.length*rowH+26)+"px"; const g=canvasFor("rcSpeed"); if(g){ const {c,W,H}=g, u=fmtSpeed(1).u;
+    const all=rows.flatMap(r=>[r.real,r.range].filter(v=>v!=null)), lo=Math.floor((Math.min(...all)-4)/5)*5, hi=Math.ceil((Math.max(...all)+4)/5)*5, Lp=78, Rp=14, X=v=>Lp+(v-lo)/(hi-lo)*(W-Lp-Rp);
+    c.strokeStyle=line; c.lineWidth=1; c.fillStyle=mut; c.font="10px "+F; c.textAlign="center"; const st=(hi-lo)>40?10:5;
+    for(let v=lo; v<=hi; v+=st){ c.beginPath(); c.moveTo(X(v),6); c.lineTo(X(v),H-16); c.stroke(); c.fillText(String(v),X(v),H-4); }
+    rows.forEach((r,i)=>{ const y=6+i*rowH+rowH/2; c.fillStyle=ink; c.font="600 12px "+F; c.textAlign="left"; c.fillText(CLUBS[r.k].name,6,y+4);
+      if(r.range!=null){ c.strokeStyle=mut; c.lineWidth=2; c.beginPath(); c.moveTo(X(r.range),y); c.lineTo(X(r.real),y); c.stroke(); c.fillStyle=surf; c.beginPath(); c.arc(X(r.range),y,4.5,0,Math.PI*2); c.fill(); c.strokeStyle=mut; c.stroke(); }
+      c.fillStyle=acc; c.strokeStyle=surf; c.lineWidth=2; c.beginPath(); c.arc(X(r.real),y,5,0,Math.PI*2); c.fill(); c.stroke();
+      c.fillStyle=ink; c.font="600 11px "+F; const right=r.range==null||r.real>=r.range; c.textAlign=right?"left":"right"; c.fillText(`${r.real.toFixed(0)} ${u}`, X(r.real)+(right?9:-9), y+4); }); } } }
+}
 // lo que cambia de la cancha al range, y lo que tienen en común los malos tiros
 function realInsights(R){ const out=[], sw=R.swings.filter(w=>!w.prac), u=fmtSpeed(1).u;
   const base=history.filter(h=>!h.sim && !h.example && h.ctx!=="real" && h.at<R.at && R.at-h.at<120*864e5);
@@ -1594,6 +1666,10 @@ function realReportHtml(R, live){ const sw=R.swings.filter(w=>!w.prac), u=fmtSpe
   if(drv.length) tiles.push(["Driver",`${toUnit(mean(drv.map(w=>w.ms))).toFixed(0)} ${u}`]);
   let h=`<h2>${live?"Tu ronda hasta ahora":"Resumen de la ronda"}</h2><p class="note">${escH(R.course)} · ${fmtWhen(R.at)} · ${new Set(R.swings.map(w=>w.hole)).size} hoyos · ${R.swings.length-sw.length} swings de práctica aparte</p>`;
   h+=`<div class="kpis">${tiles.slice(0,4).map(([k,v])=>`<div><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>`;
+  // gráficas de la ronda
+  if(sw.some(w=>w.dir)) h+=`<div class="rchart"><h4>A dónde se fue la bola</h4><canvas class="plot" id="rcDir" aria-label="Golpes a la izquierda, al objetivo y a la derecha"></canvas></div>`;
+  if(sw.filter(w=>w.ratio).length>=2) h+=`<div class="rchart"><h4>Tempo golpe a golpe</h4><canvas class="plot" id="rcTempo" aria-label="Tempo de cada golpe de la ronda frente a tu rango del range"></canvas><div class="legend"><span><i style="background:var(--ink)"></i>Buen contacto o sin marcar</span><span><i class="ring" style="border-style:solid"></i>Contacto malo</span><span><i style="background:var(--line)"></i>Tu tempo en el range</span><span><i style="background:var(--good);opacity:.35"></i>Zona ideal 2,7–3,3</span></div></div>`;
+  if(realSpeedRows(R).length) h+=`<div class="rchart"><h4>Velocidad: range contra cancha</h4><canvas class="plot" id="rcSpeed" aria-label="Velocidad promedio de cada palo en el range y en la cancha"></canvas><div class="legend"><span><i class="ring" style="border-style:solid;border-color:var(--muted)"></i>Range</span><span><i style="background:var(--accent);border-radius:50%"></i>Cancha</span></div></div>`;
   const ins=realInsights(R); if(ins.length) h+=`<h3 class="sub">Lo que dice tu ronda</h3>`+ins.map(([c,t])=>`<div class="insight ${c}">${t}</div>`).join("");
   if(rep.top.length){ h+=`<h3 class="sub">Lo que más se repitió</h3><div class="faults">`+rep.top.map(t=>`<div class="fault"><div class="fh"><b>${escH(t.name)}</b><span>${t.n} de ${rep.n} golpes</span></div><div class="bar"><i style="width:${Math.round(t.freq*100)}%"></i></div><small>Meta: ${escH(t.goal)}</small></div>`).join("")+`</div>`;
     const d=rep.drills[0]; if(d){ const cs=sw.filter(w=>rep.top[0] && w.faults.some(f=>f.id===rep.top[0].id)).map(w=>w.club), c0=cs.sort((a,b)=>cs.filter(x=>x===b).length-cs.filter(x=>x===a).length)[0]||"driver";

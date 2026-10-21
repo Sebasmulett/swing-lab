@@ -7,7 +7,7 @@ const SL=window.SL;
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
 const CAL_KEY="sl13_sndCal";
 // procesador de audio: por cada bloque de 128 muestras busca el salto más brusco (derivada) y lo compara con el ruido de fondo
-const WORKLET_URL="js/sound-worklet.js?v=0.21";
+const WORKLET_URL="js/sound-worklet.js?v=0.22";
 const S=SL.Sound={ on:false, ctx:null, cands:[], muted:[], lastErr:null };
 let node=null, src=null;
 // hora del reloj de la página (la misma de los cuadros de video) para un instante del reloj de audio
