@@ -26,6 +26,10 @@ Los nombres de los campos se usan solo como referencia; la app no está afiliada
 - **Práctica con video y coach**: cada swing con la cámara queda en video (solo en el teléfono) con sus líneas; al final de la práctica, las fallas que más se repiten y ejercicios con una meta medible.
 - **Estrategia según tu dispersión**: la elipse de tus tiros sobre el hoyo y el punto de apuntar con menos golpes esperados.
 
+## En la cancha
+
+Pestaña **Cancha** para una ronda de verdad: el teléfono en la bolsa o en un trípode lee cada swing (con su video) y lo anota en el hoyo; con un toque marcas a dónde se fue la bola y cómo fue el contacto. Si el micrófono está activo, los swings sin golpe a la bola quedan como práctica. Al final: qué cambia entre el range y la cancha (tempo, velocidad por palo), qué tienen en común tus tiros malos y el ejercicio para tu próximo range. Incluye pantalla apagada para ahorrar batería mientras la cámara sigue leyendo.
+
 ## Vestuario (maqueta)
 
 El golfista 3D se puede vestir: camiseta, pantalón, gorra, zapatos, guante, tono de piel y bolsa, con conjuntos listos. La gorra, el pecho y la bolsa tienen espacios de marca para futuras alianzas; las marcas que aparecen son inventadas, solo de ejemplo.

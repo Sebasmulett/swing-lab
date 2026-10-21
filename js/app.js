@@ -2,13 +2,15 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.19";
+const VERSION="0.20";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
 const S=Object.assign({units:"mph", dist:"m", hand:"R", hold:"phone", invert:false, input:"sensor", camFacing:"user", camGrip:"empty", camView:"front", camModel:"auto", camSound:(/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1))?"off":"on", camShutter:"auto", bag:"4", sgBase:"hcp15", ambient:true, saveVideo:true, alt:0, shot:"normal", qcDone:false, voice:true, cont:true, guide:false, guideRatio:"24/8"}, store.get("sl2_settings",{}));
 let club=store.get("sl2_club","driver"); if(!CLUBS[club]) club="driver";
-let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank"].includes(mode)) mode="range";
+let mode=store.get("sl3_mode","range"); if(!["range","course","data","rank","real"].includes(mode)) mode="range";
+// sin simulación 3D: Datos y En la cancha
+const flat=()=>mode==="data"||mode==="real";
 let calib=Object.assign(Object.fromEntries(Object.keys(CLUBS).map(k=>[k,[]])), store.get("sl2_calib",{}));
 let myCarry=store.get("sl5_mycarry",{}), myKind=store.get("sl11_mykind",{});   // distancia típica por palo (m) y si es carry o total
 let history=store.get("sl2_hist",[]), traces=store.get("sl2_traces",[]), records=store.get("sl2_records",{});
@@ -201,8 +203,8 @@ function renderAim(){ const d=aimDist(), o=aimOrigin(), p=aimPoint(); let side="
   const st=shotFor(club); $("aimDist").textContent=`Objetivo ${fmtDist(d)}${side}`+(st!=="normal"?` · ${SL.SHOTS[st].name}`:"");
   $("aimBar").style.bottom=$("card").hidden?"10px":"84px";   // si está la tarjeta del tiro, los controles van encima de ella
   $("aimInfo").innerHTML=yardage(); $("aimInfo").hidden=!$("aimInfo").innerHTML; { const ub=$("useStrat"); if(ub) ub.onclick=e=>{ e.stopPropagation(); useStrategy(); }; } $("aimGo").textContent=aimMode?"Listo":"🎯 Apuntar"; $("aimPin").hidden=!(mode==="course"&&course&&course.aim);
-  $("aimBar").hidden=!has3D || mode==="data" || World.busy() || World.flying() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig();
-  $("wdOpen").hidden=!has3D || !SL.Wardrobe || mode==="data" || mode==="rank" || World.busy() || World.flying() || aimMode || !$("card").hidden || camIsBig(); void o; void p; }
+  $("aimBar").hidden=!has3D || flat() || World.busy() || World.flying() || (mode==="course"&&course&&(course.holed||course.done)) || camIsBig();
+  $("wdOpen").hidden=!has3D || !SL.Wardrobe || flat() || mode==="rank" || World.busy() || World.flying() || aimMode || !$("card").hidden || camIsBig(); void o; void p; }
 function nudgeAim(deg){ const o=aimOrigin(), p=aimPoint(), d=Math.hypot(p.x-o.x,p.z-o.z), y=yawTo(o,p)+deg*DEG;
   setAim({x:o.x+Math.sin(y)*d, z:o.z+Math.cos(y)*d},true); }
 function toggleAimView(on){ aimMode=on; const o=aimOrigin(), p=aimPoint();
@@ -412,8 +414,10 @@ function useStrategy(){ const s=strategy(); if(!s) return; setAim(s.aim,true); c
 // Una sesión de práctica junta tus swings, detecta las fallas que más se repiten y te da ejercicios con una meta medible.
 const FOCUS={driver:{n:"Driver",clubs:["driver"]}, maderas:{n:"Maderas e híbrido",clubs:["wood3","hybrid"]}, hierros:{n:"Hierros",clubs:["iron5","iron7","iron9"]}, wedges:{n:"Wedges",clubs:null}, todos:{n:"Todos los palos",clubs:null}};
 let practice=store.get("sl18_practice",null), sessions=store.get("sl18_sessions",[]), pracSel=null;
+let realRound=store.get("sl20_real",null), realRounds=store.get("sl20_realRounds",[]), realSel=null, realLastTag=null;
 const focusClubs=f=>f==="wedges"?bagWedges():f==="todos"?Object.keys(CLUBS).filter(inBag):(FOCUS[f]?FOCUS[f].clubs:[club]);
-const keepVideoIds=()=>{ const ids=[]; sessions.forEach(s=>s.swings.forEach(w=>ids.push(w.id))); if(practice) practice.swings.forEach(w=>ids.push(w.id)); return ids; };
+const keepVideoIds=()=>{ const ids=[]; sessions.forEach(s=>s.swings.forEach(w=>ids.push(w.id))); if(practice) practice.swings.forEach(w=>ids.push(w.id));
+  realRounds.forEach(r=>r.swings.forEach(w=>{ if(!w.prac) ids.push(w.id); })); if(realRound) realRound.swings.forEach(w=>ids.push(w.id)); return ids; };
 function swingSummary(h){ const dv=derive(h), k=clockOf(h), partial=isWedge(h.club)&&(k==="730"||k==="900"||k==="1030");
   return {id:h.id, at:h.at||Date.now(), club:h.club, src:h.source, view:h.view||null, ms:+dv.ms.toFixed(2), carry:+dv.carry.toFixed(1), ratio:h.ratio?+h.ratio.toFixed(2):null, aoa:h.aoaOk?h.aoa:null, path:h.pathOk?h.path:null,
     faults:SL.Coach.faultsOf(h,{partial}), cats:SL.Coach.cats(h), video:false}; }
@@ -447,8 +451,8 @@ function keepClip(res, clipP){ if(!SL.VStore) return; clipP.then(c=>{ if(!c) ret
     const meta={club:res.club, view:res.view, mirror:!!(pose&&pose.mirror), start:c.start, mime:c.mime, w:F[0]?F[0].w:0, h:F[0]?F[0].h:0, thumb,
       frames:F.map(f=>({t:Math.round(f.t), p:Object.fromEntries(Object.entries(f.p).map(([k,v])=>[k,[Math.round(v[0]*10)/10,Math.round(v[1]*10)/10]]))})),
       marks:pose&&pose.marks?{a:rel(pose.marks.a), top:rel(pose.marks.top), imp:rel(pose.marks.imp), fin:rel(pose.marks.fin)}:null, lines:pose&&pose.posture?pose.posture.lines||null:null};
-    return SL.VStore.put(res.id, c.blob, meta, keepVideoIds()).then(()=>{ const all=[...(practice?practice.swings:[]), ...sessions.flatMap(s=>s.swings)]; const w=all.find(s=>s.id===res.id); if(w){ w.video=true; store.set("sl18_practice",practice); store.set("sl18_sessions",sessions); }
-      renderPractice(); }); }).catch(()=>{}); }
+    return SL.VStore.put(res.id, c.blob, meta, keepVideoIds()).then(()=>{ const all=[...(practice?practice.swings:[]), ...sessions.flatMap(s=>s.swings), ...(realRound?realRound.swings:[])]; const w=all.find(s=>s.id===res.id); if(w){ w.video=true; store.set("sl18_practice",practice); store.set("sl18_sessions",sessions); store.set("sl20_real",realRound); }
+      renderPractice(); renderReal(); }); }).catch(()=>{}); }
 // ---- pestaña Práctica en Datos ----
 const escH=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmtWhen=t=>new Date(t).toLocaleDateString("es-CO",{day:"numeric",month:"short"})+" "+new Date(t).toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"});
@@ -484,7 +488,7 @@ function reportHtml(S0){ const rep=SL.Coach.report(S0.swings), u=fmtSpeed(1).u, 
 // ---- visor del video en cámara lenta con las líneas encima ----
 let rv=null;
 function openReview(id){ if(!SL.VStore) return; Promise.all([SL.VStore.get(id), SL.VStore.meta(id)]).then(([blob,meta])=>{ const m=$("vidModal"), v=$("rvVideo"), cv=$("rvCanvas");
-  const sw=[...sessions.flatMap(s=>s.swings), ...(practice?practice.swings:[])].find(s=>s.id===id), hh=history.find(x=>x.id===id);
+  const sw=[...sessions.flatMap(s=>s.swings), ...(practice?practice.swings:[]), ...realRounds.flatMap(r=>r.swings), ...(realRound?realRound.swings:[])].find(s=>s.id===id), hh=history.find(x=>x.id===id);
   $("rvInfo").innerHTML=reviewInfo(sw,hh,meta);
   if(!blob){ $("rvNote").textContent="Este video ya no está en el teléfono (se borran los más viejos). Los datos y ejercicios siguen aquí."; v.removeAttribute("src"); m.hidden=false; rv={id, meta:null}; return; }
   $("rvNote").textContent=""; const url=URL.createObjectURL(blob); if(rv&&rv.url) URL.revokeObjectURL(rv.url); rv={id, meta, url, blob, lines:true};
@@ -1122,7 +1126,7 @@ function renderCalib(){
 function buildShots(){ const row=$("shotRow"); row.innerHTML=Object.entries(SL.SHOTS).map(([k,v])=>`<button class="chip sm" data-shot="${k}" aria-pressed="false">${v.name}</button>`).join("");
   row.querySelectorAll(".chip").forEach(b=>b.addEventListener("click",()=>{ S.shot=b.dataset.shot; saveSettings(); renderShots(); suggestClub(); renderAim(); })); }
 function renderShots(){ const eff=shotFor(club); document.querySelectorAll("#shotRow .chip").forEach(b=>{ const k=b.dataset.shot, w=SL.SHOTS[k].wedges && !(isWedge(club)||club==="iron9");
-  b.disabled=w; b.setAttribute("aria-pressed",String(k===eff)); b.title=w?"Solo con hierro 9, PW o SW":""; }); $("shotRow").hidden=mode==="data"||mode==="rank"; }
+  b.disabled=w; b.setAttribute("aria-pressed",String(k===eff)); b.title=w?"Solo con hierro 9, PW o SW":""; }); $("shotRow").hidden=flat()||mode==="rank"; }
 // Calibración rápida: tu distancia típica con el driver y dónde juegas (altura)
 function renderQuick(){ const card=$("quickCal"); if(!card) return; const need=!clubFactor("driver",S.input) && !S.qcDone && mode!=="rank";
   card.hidden=!need; $("qcUnit").textContent=S.dist==="yd"?"yd":"m"; $("qcAlt").value=String(S.alt||0);
@@ -1136,13 +1140,13 @@ function renderChips(){ renderShots(); renderQuick(); document.querySelectorAll(
   // centra el palo elegido en su fila sin mover la página (antes la página saltaba hacia abajo en pleno vuelo de la bola)
   const cur=document.querySelector('#clubRow .chip[aria-pressed="true"]'), row=$("clubRow"); if(cur && row) try{ row.scrollTo({left:cur.offsetLeft-(row.clientWidth-cur.offsetWidth)/2, behavior:"smooth"}); }catch(_){} 
   document.querySelectorAll("#distSeg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===S.dist))); }
-function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderWedges(); renderDrill(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); }
+function renderAll(){ if(typeof renderAim==="function" && $("aimBar")) renderAim(); renderBoard(shown,false); renderHist(); drawCharts(); renderWedges(); renderDrill(); renderCalib(); renderChips(); renderHud(); renderScore(); drawMini(); renderReal(); }
 
 // ================= Resultado de un swing =================
 function handleResult(res){
   lastPeakSeen = res.obs ?? res.peak ?? lastPeakSeen;
   if(res.error){ $("board").classList.add("stale"); setVerdict(res.error); beep(220,0.25); say("No reconocí el swing"); updateLive(); return; }
-  const {rawSamples,poseFrames,marks,...h}=res; h.shot=shotFor(h.club);
+  const {rawSamples,poseFrames,marks,...h}=res; h.shot=shotFor(h.club); if(mode==="real") h.ctx="real";
   if(poseFrames){ lastPose={id:h.id, poseFrames,marks,posture:h.posture, mirror:S.camFacing==="user"}; $("replayBtn").hidden=false; } else if(!h.sim) { lastPose=null; $("replayBtn").hidden=true; }
   if(S.invert && !h.sim){ h.face=-h.face; h.path=-h.path; }
   if(!h.sim && h.club==="driver") addEntry("speeds",{v:+derive(h).ms.toFixed(2), src:srcOf(h)});
@@ -1154,6 +1158,7 @@ function handleResult(res){
   const sh=shapeName(h);
   if(mode==="range" && has3D){ rangeShot(h); say(`${s.v} ${s.say}. Carry ${sayDist(dv.carry)}.`+(sh?` ${sh}.`:"")); }
   else if(mode==="course" && has3D) courseShot(h);
+  else if(mode==="real") realShot(h);
   else say(`${s.v} ${s.say}.`+(h.ratio?` Tempo ${h.ratio.toFixed(1).replace(".",",")} a 1.`:""));
 }
 
@@ -1234,17 +1239,17 @@ const camIsBig=()=>S.input==="camera" && camState==="on" && !$("camBox").hidden 
 // La cámara va pequeña sobre el campo (ves el campo y apuntas) o en grande; en Datos siempre en grande
 function camLayer(on,noResume){
   const box=$("camBox"), rep=SL.Cam.replaying(), show=(on!==false && S.input==="camera" && SL.Cam.on) || rep;
-  const big=rep || camBig || mode==="data" || mode==="rank" || !has3D;
+  const big=rep || camBig || flat() || mode==="rank" || !has3D;
   box.hidden=!show; box.classList.toggle("big",big); box.classList.toggle("pip",!big); $("view").classList.toggle("pipOn",show && !big);
   box.classList.toggle("paused",!!SL.Cam.paused && !rep);
   $("camVideo").hidden=!!window.__camMock || rep; $("camCanvas").hidden=false;
-  $("camSize").hidden=mode==="data" || !has3D || rep; $("camSize").textContent=big?"▣":"⤢"; $("camSize").setAttribute("aria-label",big?"Ver el campo":"Agrandar la cámara");
+  $("camSize").hidden=flat() || !has3D || rep; $("camSize").textContent=big?"▣":"⤢"; $("camSize").setAttribute("aria-label",big?"Ver el campo":"Agrandar la cámara");
   $("camPause").hidden=rep; $("camPause").textContent=camHold?"▶":"⏸";
   // flecha hacia el objetivo según dónde está la cámara, si la imagen va en espejo y si eres diestro o zurdo
   { const mirror=S.camFacing==="user", lead=S.hand==="L"?-1:1, screen=(mirror?-1:1)*lead, big2=big;
     $("camTgt").textContent=S.camView==="behind"?(big2?"🎯 Objetivo ↑ al fondo":"🎯 ↑"):(screen<0?(big2?"🎯 ← Objetivo":"🎯 ←"):(big2?"Objetivo → 🎯":"→ 🎯"));
     $("camTgt").hidden=rep; $("camTgt").style.left=screen>0&&S.camView!=="behind"?"auto":""; $("camTgt").style.right=screen>0&&S.camView!=="behind"?(big2?"12px":"72px"):""; } $("camPause").setAttribute("aria-label",camHold?"Seguir leyendo swings":"Pausar la lectura");
-  if(show && mode==="data") $("view").hidden=false;
+  if(show && flat()) $("view").hidden=false;
   // al volver al address después de un tiro, se reanuda la lectura
   if(has3D) World.idleFps = !show || aimMode ? 0 : big ? 3 : 15;
   if(!noResume && show && !rep && SL.Cam.paused && !camHold && !aimMode && !World.busy()){ SL.Cam.flash("",null,0); SL.Cam.pause(false,900); }
@@ -1261,7 +1266,7 @@ function camStatus(text,kind){ const m=$("camMsg"); m.textContent=text||""; m.cl
 function showGuide(){ $("guideSide").textContent=S.hand==="L"?"a tu derecha (eres zurdo)":"a tu izquierda (eres diestro)"; $("camGuide").hidden=false; }
 $("guideOk").addEventListener("click",()=>{ $("camGuide").hidden=true; store.set("sl11_guide",true); });
 $("guideShow").addEventListener("click",showGuide);
-$("camBox").addEventListener("click",e=>{ e.stopPropagation(); if(SL.Cam.replaying() || mode==="data" || mode==="rank" || !has3D) return; camBig=!camBig; camLayer(true); });
+$("camBox").addEventListener("click",e=>{ e.stopPropagation(); if(SL.Cam.replaying() || flat() || mode==="rank" || !has3D) return; camBig=!camBig; camLayer(true); });
 // diagnóstico: qué ve la cámara (visibilidad, quietud, qué falta) para entender por qué no capta
 function setDiag(on){ SL.Cam.showDiag=!!on; $("camDiag").setAttribute("aria-pressed",String(!!on)); store.set("sl19_diag",!!on); if(on && !camBig){ camBig=true; camLayer(true); } }
 $("camDiag").addEventListener("click",e=>{ e.stopPropagation(); setDiag(!SL.Cam.showDiag); });
@@ -1277,13 +1282,13 @@ function camError(res){
   const soft=["slow","short","noback"].includes(res.code);
   SL.Cam.flash(soft?"Eso no pareció un swing completo":res.error, "bad", soft?2200:4000);
   if(!soft){ beep(220,0.2); say(res.code==="noimp"?"No vi el impacto. Termina el swing dentro de la imagen.":"No pude medir ese swing."); }
-  if(mode==="data"){ setVerdict(res.error); }
+  if(flat()){ setVerdict(res.error); }
 }
 async function camStart(){
   msg(""); audio(); say(" ");
   if(window.top!==window){ msg("Dentro de Claude no se puede usar la cámara. Abre la app publicada o usa Golpe de prueba.",true); return; }
   if(!SL.Cam.supported() && !window.__camMock){ msg("Este navegador no permite usar la cámara. Prueba con Safari o Chrome.",true); return; }
-  if(!has3D || mode==="data") $("view").hidden=false;
+  if(!has3D || flat()) $("view").hidden=false;
   $("go").textContent="Iniciando cámara…"; $("go").className="go live"; camHold=false; camBig=false;
   $("camBox").hidden=false; $("camBox").classList.add("pip"); $("camVideo").hidden=!!window.__camMock;
   if(!store.get("sl11_guide",false)) showGuide();
@@ -1303,12 +1308,12 @@ async function camStart(){
       if(SL.Sound && SL.Sound.on){ const hit=SL.Sound.impactFor(res);
         if(hit){ if(hit.t!=null){ const r2=SL.analyzePose(frames, club, Object.assign({tImpact:hit.t, tImpactSrc:hit.src},po)); if(!r2.error) res=r2; } res.heard=true; } }
       res.model=SL.Cam.model; res.camFps=SL.Cam.camFps; res.shutter=SL.Cam.shutterTxt||null; res.mic=!!SL.Cam.mic;
-      if(mode==="data"||mode==="rank"||!has3D){ SL.Cam.pause(true); setTimeout(()=>{ if(camState==="on" && !camHold) SL.Cam.pause(false,600); camLayer(true); },1800); }
+      if(flat()||mode==="rank"||!has3D){ SL.Cam.pause(true); setTimeout(()=>{ if(camState==="on" && !camHold) SL.Cam.pause(false,600); camLayer(true); },1800); }
       handleResult(res); if(clipP && !res.error) keepClip(res, clipP); }});
   if(!ok){ camState="off"; setCamButton(); camLayer(false); return; }
   camState="on"; keepAwake(); setCamButton(); camLayer(true);
 }
-function camStop(){ SL.Cam.stop(); camState="off"; setCamButton(); camLayer(false); if(mode==="data") $("view").hidden=true; }
+function camStop(){ SL.Cam.stop(); camState="off"; setCamButton(); camLayer(false); if(flat()) $("view").hidden=true; }
 function setCamButton(){ const g=$("go"); g.className="go"; if(camState==="on"){ g.textContent="Cámara activa · tocar para apagar"; g.classList.add("live"); } else { g.textContent="Activar cámara"; $("status").className="pill"; $("status").textContent="Cámara apagada"; } }
 function setInput(i){
   if(i===S.input) return;
@@ -1338,7 +1343,7 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 const gauss=()=>{ let u=0; while(!u)u=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random()); };
 function testShot(){
   audio(); const c=CLUBS[club]; let ms;
-  if(mode!=="data" && !(mode==="course" && (!course || course.holed || course.done))){
+  if(!flat() && !(mode==="course" && (!course || course.holed || course.done))){
     // apunta a la distancia del objetivo (si el palo llega) con error humano
     const target=aimDist(), lie=mode==="course"?course.lie:"tee"; let lo=c.def*0.15, hi=c.def*1.08;
     for(let i=0;i<20;i++){ const mid=(lo+hi)/2, s=SL.simulateLocal(launch(club,mid,{shot:shotFor(club)},lie),[0,0],null); if(Math.hypot(s.x,s.z)<target) lo=mid; else hi=mid; }
@@ -1356,7 +1361,7 @@ function testShot(){
 $("testShot").addEventListener("click",testShot);
 $("view").addEventListener("click",e=>{
   if(World.busy() || World.flying()){ World.skip(); return; }
-  if(!has3D || mode==="data" || mode==="rank" || SL.Cam.replaying() || camIsBig()) return;
+  if(!has3D || flat() || mode==="rank" || SL.Cam.replaying() || camIsBig()) return;
   if(mode==="course" && course && (course.holed||course.done)) return;
   const p=World.pick(e.clientX,e.clientY); if(!p) return;
   const o=aimOrigin(); if((p.x-o.x)*Math.sin(aimYaw())+(p.z-o.z)*Math.cos(aimYaw())<3 && !aimMode) return;   // no apuntar hacia atrás
@@ -1373,12 +1378,13 @@ function setMode(m){
   document.querySelectorAll(".mode").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.mode===m)));
   document.querySelectorAll("[data-for]").forEach(s=>s.hidden=s.dataset.for!==m);
   document.body.classList.toggle("m-rank",m==="rank");
-  $("view").hidden=m==="rank" || ((m==="data"||!has3D) && !(S.input==="camera" && camState==="on")); $("board").classList.toggle("compact",m!=="data"); $("mini").hidden=m!=="course";
+  $("view").hidden=m==="rank" || ((m==="data"||m==="real"||!has3D) && !(S.input==="camera" && camState==="on")); $("board").classList.toggle("compact",m!=="data"); document.body.classList.toggle("m-real",m==="real"); $("mini").hidden=m!=="course";
   $("card").hidden=true; setHudMsg(null); $("holeTip").hidden=true; $("skip").hidden=true; if(aimMode){ aimMode=false; } renderDrill(); renderPracticeTip();
-  if(has3D) World.setActive(m!=="data" && m!=="rank");
+  if(has3D) World.setActive(m!=="data" && m!=="rank" && m!=="real");
   if(m==="range") setupRange();
   else if(m==="course"){ if(!course) newRound(); else { builtHole=""; setupHole(false); } renderCourses(); renderScore(); }
   else if(m==="rank") renderRank();
+  else if(m==="real") renderReal();
   else { drawCharts(); }
   if(camState==="on"){ if(m==="rank"){ SL.Cam.pause(true); } camLayer(m!=="rank"); }
   suggestClub(); renderAll();
@@ -1483,6 +1489,134 @@ function drawSwingViz(){
   c.fillStyle=ink; c.beginPath(); c.arc(ox,oy,4,0,Math.PI*2); c.fill();
   c.textAlign="center"; c.font="600 12px "+css("--body"); c.fillText(shapeName(h)||"",ox,H-6);
 }
+
+// ================= En la cancha (ronda real) =================
+// Cada swing que lee la cámara (o el sensor) en una ronda de verdad queda con su hoyo, su video y lo que tú marcas
+// del resultado (dirección y contacto). Al final se compara con tu range y se buscan los patrones de tus malos tiros.
+const DIRS=[["L","⬅ Izquierda"],["C","✓ Al objetivo"],["R","Derecha ➡"]], QUAL=[["g","👍 Buena"],["m","😐 Regular"],["b","👎 Mala"]];
+function realSave(){ store.set("sl20_real",realRound); store.set("sl20_realRounds",realRounds); }
+function realHoleOf(R,n){ if(!R.holes[n]) R.holes[n]={par:4}; return R.holes[n]; }
+function realStart(){ const name=($("realCourse").value||"").trim()||"Cancha"; S.camView=$("realView").value; store.set("sl20_view",S.camView); saveSettings(); $("camView").value=S.camView; if(camState==="on") SL.Cam.setView(S.camView);
+  const names=store.get("sl20_courses",[]); store.set("sl20_courses",[name,...names.filter(n=>n!==name)].slice(0,8));
+  realRound={id:Date.now(), at:Date.now(), course:name, hole:1, holes:{1:{par:4}}, swings:[]}; realSel=null; realSave();
+  if(S.input!=="camera") setInput("camera");
+  renderReal(); say(`Ronda en ${name}. Hoyo 1.`+(camState==="on"?"":" Enciende la cámara cuando estés en el tee."));
+  window.scrollTo({top:0,behavior:"smooth"}); }
+function realEnd(){ const R=realRound; if(!R) return; realRound=null;
+  if(R.swings.length){ realRounds.unshift(R); realRounds=realRounds.slice(0,30); realSel=R.id; } realSave(); realDim(false); renderReal();
+  if(R.swings.length){ const n=R.swings.filter(w=>!w.prac).length; say(`Ronda terminada: ${n} golpes leídos. Abajo tienes el resumen.`); setTimeout(()=>$("realReport").scrollIntoView({behavior:"smooth"}),200); } }
+// swing leído en la cancha: se guarda y se pide el resultado
+function realShot(h){ if(h.sim || h.example){ setVerdict("Golpe de prueba: no se guarda en tu ronda. En la cancha, cada swing real que lea la cámara queda aquí."); return; }
+  if(!realRound){ const name=($("realCourse").value||"").trim()||"Cancha"; realRound={id:Date.now(), at:Date.now(), course:name, hole:1, holes:{1:{par:4}}, swings:[]}; }
+  const R=realRound, w=Object.assign(swingSummary(h),{hole:R.hole, dir:null, q:null, heard:!!h.heard, face:h.faceOk?h.face:null, arcTop:h.arcTop??null, mic:!!h.mic});
+  // con micrófono: si no se oyó el golpe a la bola, fue un swing de práctica
+  w.prac=!!(h.mic && h.source==="camera" && !h.heard);
+  R.swings.push(w); realLastTag=w.id; realSave(); renderReal();
+  const s=fmtSpeed(w.ms), f=w.faults[0];
+  say(`${s.v} ${s.say}.`+(w.ratio?` Tempo ${w.ratio.toFixed(1).replace(".",",")}.`:"")+(w.prac?" Swing de práctica.":"")+(f?` ${f.name}.`:" Buen swing."));
+  if(realDimOn) $("dimLast").textContent=`${s.v} ${s.u}`+(w.ratio?` · ${w.ratio.toFixed(1)}:1`:""), $("dimSub").textContent=(f?f.name:"Buen swing")+" · toca para marcar el resultado";
+}
+function realTag(id,k,v){ const R=realRound; const w=R&&R.swings.find(x=>x.id===id); if(!w) return; w[k]=w[k]===v&&k!=="prac"?null:v; if(k==="prac") w.prac=!!v; realSave(); renderReal(); }
+// la clave del día: la falla que más se repite (en esta ronda si ya hay 4 golpes; si no, en tu última práctica)
+function realKey(){ const R=realRound; let src=null, rep=null;
+  const sw=R?R.swings.filter(w=>!w.prac):[]; if(sw.length>=4){ rep=SL.Coach.report(sw); src="en esta ronda"; }
+  else if(sessions[0]){ rep=SL.Coach.report(sessions[0].swings); src="en tu última práctica"; }
+  const t=rep&&rep.top[0]; if(!t) return `🔑 <b>Tu clave:</b> ritmo suave y terminar en equilibrio. Después de 4 golpes te digo en qué fijarte.`;
+  return `🔑 <b>Tu clave</b> (${src}): ${escH(t.name.toLowerCase())}. Meta: ${escH(t.goal)}.`; }
+const DIR_ICON={L:"⬅",C:"🎯",R:"➡"}, Q_ICON={g:"👍",m:"😐",b:"👎"};
+function shotRow(w){ const u=fmtSpeed(1).u, f=w.faults[0];
+  return `<button class="rshot${w.prac?" prac":""}" data-id="${w.id}"><i>${w.prac?"🔁":(DIR_ICON[w.dir]||"•")}</i><span><b>${CLUBS[w.club]?CLUBS[w.club].name:""}</b> · ${toUnit(w.ms).toFixed(0)} ${u}${w.ratio?` · ${w.ratio.toFixed(1)}:1`:""}<small>${w.prac?"práctica":f?escH(f.name):"✓ sin fallas"}</small></span><em>${w.prac?"":(Q_ICON[w.q]||"")}${w.video?" ▶":""}</em></button>`; }
+function renderReal(){ const sec=document.querySelector('[data-for="real"]'); if(!sec || sec.hidden) return; const R=realRound;
+  $("realSetup").hidden=!!R; $("realLive").hidden=!R;
+  { const names=store.get("sl20_courses",[]), sug=[...names, ...SL.COURSES.filter(c=>c.n>=9).map(c=>c.name)]; $("realCourses").innerHTML=[...new Set(sug)].map(n=>`<option value="${escH(n)}">`).join("");
+    if(!$("realCourse").value && names[0]) $("realCourse").value=names[0]; if(!R) $("realView").value=store.get("sl20_view","behind"); }
+  if(R){ const H=realHoleOf(R,R.hole), here=R.swings.filter(w=>w.hole===R.hole);
+    $("realHole").textContent=R.hole; $("realCount").textContent=here.filter(w=>!w.prac).length; $("realHoleM").disabled=R.hole<=1;
+    $("realPar").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.p===H.par)));
+    $("realKey").innerHTML=SL.Coach?realKey():"";
+    const w=R.swings.find(x=>x.id===realLastTag), tag=$("realTag");
+    if(w){ const s=fmtSpeed(w.ms); tag.hidden=false;
+      tag.innerHTML=`<div class="tt"><b>¿Cómo salió? · ${CLUBS[w.club]?CLUBS[w.club].name:""}</b><span>${s.v} ${s.u}${w.ratio?` · tempo ${w.ratio.toFixed(1)}:1`:""}${w.path!=null?` · ruta ${w.path>0?"+":""}${w.path.toFixed(0)}°`:""}</span></div>`+
+        (w.prac?"":`<div class="tg">${DIRS.map(([k,t])=>`<button data-k="dir" data-v="${k}" aria-pressed="${w.dir===k}">${t}</button>`).join("")}</div><div class="tg">${QUAL.map(([k,t])=>`<button data-k="q" data-v="${k}" aria-pressed="${w.q===k}">${t}</button>`).join("")}</div>`)+
+        `<button class="prac" data-k="prac" aria-pressed="${w.prac}">${w.prac?"🔁 Swing de práctica (no cuenta) · toca si fue un golpe":"Fue un swing de práctica"}${w.mic&&!w.heard&&w.prac?" — no oí el golpe":""}</button>`;
+      tag.querySelectorAll("button").forEach(b=>b.onclick=()=>{ realTag(w.id,b.dataset.k,b.dataset.k==="prac"?!w.prac:b.dataset.v); if(b.dataset.k==="q" && w.dir){ realLastTag=null; renderReal(); } });
+    } else tag.hidden=true;
+    $("realLog").innerHTML=here.length?here.slice().reverse().map(shotRow).join(""):`<p class="note">Aún no hay swings en este hoyo. Cuando la cámara diga <b>Listo</b>, haz tu swing.</p>`;
+    $("realLog").querySelectorAll(".rshot").forEach(b=>b.onclick=()=>{ const id=+b.dataset.id; const x=R.swings.find(s=>s.id===id); if(x && x.video) openReview(id); else { realLastTag=id; renderReal(); } });
+  }
+  // rondas guardadas y el informe
+  $("realListH").hidden=!realRounds.length;
+  $("realList").innerHTML=realRounds.map(r=>{ const n=r.swings.filter(w=>!w.prac).length, hs=new Set(r.swings.map(w=>w.hole)).size;
+    return `<button class="pcard${r.id===realSel?" on":""}" data-id="${r.id}"><b>${escH(r.course)}</b><span>${fmtWhen(r.at)}</span><small>${hs} hoyos · ${n} golpes</small></button>`; }).join("");
+  $("realList").querySelectorAll(".pcard").forEach(b=>b.onclick=()=>{ realSel=+b.dataset.id; renderReal(); });
+  const show=R && R.swings.length>=3 ? R : realRounds.find(r=>r.id===realSel) || (R?null:realRounds[0]);
+  $("realReport").innerHTML=show?realReportHtml(show, show===R):"";
+  if(show){ $("realReport").querySelectorAll(".rshot").forEach(b=>b.onclick=()=>{ const x=show.swings.find(s=>s.id===+b.dataset.id); if(x&&x.video) openReview(x.id); });
+    const pr=$("realPrac"); if(pr) pr.onclick=()=>{ startPractice(pr.dataset.f, 10); };
+    const del=$("realDel"); if(del) del.onclick=()=>{ if(del.dataset.sure){ realRounds=realRounds.filter(r=>r.id!==show.id); realSel=null; realSave(); SL.VStore&&SL.VStore.prune(keepVideoIds()); renderReal(); } else { del.dataset.sure="1"; del.textContent="¿Seguro? Toca otra vez"; } };
+  }
+}
+const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+// lo que cambia de la cancha al range, y lo que tienen en común los malos tiros
+function realInsights(R){ const out=[], sw=R.swings.filter(w=>!w.prac), u=fmtSpeed(1).u;
+  const base=history.filter(h=>!h.sim && !h.example && h.ctx!=="real" && h.at<R.at && R.at-h.at<120*864e5);
+  // ritmo
+  const rT=mean(sw.filter(w=>w.ratio).map(w=>w.ratio)), bT=mean(base.filter(h=>h.ratio).map(h=>h.ratio));
+  if(rT && bT && base.filter(h=>h.ratio).length>=5){ const d=rT-bT;
+    if(d<=-0.25) out.push(["warn",`<b>En la cancha te apuras:</b> tu tempo fue ${rT.toFixed(1)}:1 contra ${bT.toFixed(1)}:1 en el range. Antes de cada golpe, una respiración y cuenta “uno-dos” en la subida.`]);
+    else if(d>=0.3) out.push(["warn",`<b>En la cancha subes más lento</b> (${rT.toFixed(1)}:1 contra ${bT.toFixed(1)}:1 en el range). Puede ser exceso de control: confía en el swing del range.`]);
+    else out.push(["good",`<b>Tu ritmo aguanta la presión:</b> ${rT.toFixed(1)}:1 en la cancha y ${bT.toFixed(1)}:1 en el range.`]); }
+  // velocidad por palo
+  const clubs=[...new Set(sw.map(w=>w.club))];
+  for(const c of clubs){ const a=sw.filter(w=>w.club===c), b=base.filter(h=>h.club===c); if(a.length<2 || b.length<3) continue;
+    const ra=mean(a.map(w=>w.ms)), rb=mean(b.map(h=>derive(h).ms)), p=(ra/rb-1)*100;
+    if(Math.abs(p)>=4) out.push([p<0?"warn":"",`<b>${CLUBS[c].name}:</b> ${toUnit(ra).toFixed(0)} ${u} en la cancha, ${Math.abs(p).toFixed(0)}% ${p<0?"menos":"más"} que en el range (${toUnit(rb).toFixed(0)} ${u}).`+(p<0?" Frenar el palo cuesta distancia y dirección: mejor un palo más y swing completo.":" Ojo: pegarle más duro suele abrir la dispersión.")]); }
+  // patrones de los tiros marcados
+  const tagged=sw.filter(w=>w.dir), cen=tagged.filter(w=>w.dir==="C");
+  for(const [k,name] of [["R","a la derecha"],["L","a la izquierda"]]){ const m=tagged.filter(w=>w.dir===k); if(m.length<2 || m.length<tagged.length*0.25) continue;
+    const refP=mean((cen.length?cen:sw).filter(w=>w.path!=null).map(w=>w.path)), mP=mean(m.filter(w=>w.path!=null).map(w=>w.path));
+    const refT=mean((cen.length?cen:sw).filter(w=>w.ratio).map(w=>w.ratio)), mT=mean(m.filter(w=>w.ratio).map(w=>w.ratio)); const why=[];
+    if(mP!=null && refP!=null && Math.abs(mP-refP)>=1.5) why.push(`ruta ${mP>0?"+":""}${mP.toFixed(1)}° (en los ${cen.length?"rectos":"demás"} ${refP>0?"+":""}${refP.toFixed(1)}°)`);
+    if(mT && refT && Math.abs(mT-refT)>=0.25) why.push(`tempo ${mT.toFixed(1)}:1 (contra ${refT.toFixed(1)}:1)`);
+    const ff=SL.Coach.report(m).top[0]; if(ff && ff.freq>=0.5) why.push(`${ff.name.toLowerCase()} en ${ff.n} de ${m.length}`);
+    out.push(["warn",`<b>${m.length} de ${tagged.length} tiros se fueron ${name}.</b> `+(why.length?`En esos swings: ${why.join(" · ")}.`:"Tus datos de swing fueron parecidos a los buenos: puede ser la cara del palo o la alineación (revisa tus pies y hombros).")]); }
+  const good=sw.filter(w=>w.q==="g"), bad=sw.filter(w=>w.q==="b");
+  if(good.length>=2 && bad.length>=2){ const gT=mean(good.filter(w=>w.ratio).map(w=>w.ratio)), xT=mean(bad.filter(w=>w.ratio).map(w=>w.ratio)), gA=mean(good.filter(w=>w.arcTop!=null).map(w=>w.arcTop)), xA=mean(bad.filter(w=>w.arcTop!=null).map(w=>w.arcTop)); const d=[];
+    if(gT && xT && Math.abs(gT-xT)>=0.25) d.push(`tempo ${gT.toFixed(1)}:1 en los buenos contra ${xT.toFixed(1)}:1 en los malos`);
+    if(gA && xA && Math.abs(gA-xA)>=10) d.push(`subida de ${gA.toFixed(0)}° contra ${xA.toFixed(0)}°`);
+    if(d.length) out.push(["",`<b>Tus buenos contactos vs. los malos:</b> ${d.join(" · ")}. Esa es tu señal para el próximo golpe.`]); }
+  if(!tagged.length && sw.length) out.push(["",`Marca la dirección y el contacto de tus golpes (un toque después de cada uno) y aquí verás qué tienen en común tus tiros malos.`]);
+  if(!base.length) out.push(["",`Cuando midas swings en el range, aquí verás qué cambia entre el range y la cancha.`]);
+  return out; }
+function realReportHtml(R, live){ const sw=R.swings.filter(w=>!w.prac), u=fmtSpeed(1).u, rep=SL.Coach.report(sw);
+  const tagged=sw.filter(w=>w.dir), straight=tagged.length?Math.round(tagged.filter(w=>w.dir==="C").length/tagged.length*100):null, goodQ=sw.filter(w=>w.q).length?Math.round(sw.filter(w=>w.q==="g").length/sw.filter(w=>w.q).length*100):null;
+  const drv=sw.filter(w=>w.club==="driver"), tiles=[["Golpes",sw.length],["Al objetivo",straight!=null?straight+"%":"—"],["Buen contacto",goodQ!=null?goodQ+"%":"—"],["Tempo",(t=>t?t.toFixed(1)+":1":"—")(mean(sw.filter(w=>w.ratio).map(w=>w.ratio)))]];
+  if(drv.length) tiles.push(["Driver",`${toUnit(mean(drv.map(w=>w.ms))).toFixed(0)} ${u}`]);
+  let h=`<h2>${live?"Tu ronda hasta ahora":"Resumen de la ronda"}</h2><p class="note">${escH(R.course)} · ${fmtWhen(R.at)} · ${new Set(R.swings.map(w=>w.hole)).size} hoyos · ${R.swings.length-sw.length} swings de práctica aparte</p>`;
+  h+=`<div class="kpis">${tiles.slice(0,4).map(([k,v])=>`<div><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>`;
+  const ins=realInsights(R); if(ins.length) h+=`<h3 class="sub">Lo que dice tu ronda</h3>`+ins.map(([c,t])=>`<div class="insight ${c}">${t}</div>`).join("");
+  if(rep.top.length){ h+=`<h3 class="sub">Lo que más se repitió</h3><div class="faults">`+rep.top.map(t=>`<div class="fault"><div class="fh"><b>${escH(t.name)}</b><span>${t.n} de ${rep.n} golpes</span></div><div class="bar"><i style="width:${Math.round(t.freq*100)}%"></i></div><small>Meta: ${escH(t.goal)}</small></div>`).join("")+`</div>`;
+    const d=rep.drills[0]; if(d){ const cs=sw.filter(w=>rep.top[0] && w.faults.some(f=>f.id===rep.top[0].id)).map(w=>w.club), c0=cs.sort((a,b)=>cs.filter(x=>x===b).length-cs.filter(x=>x===a).length)[0]||"driver";
+      const focus=c0==="driver"?"driver":(SL.WEDGES||[]).includes(c0)?"wedges":["wood3","hybrid"].includes(c0)?"maderas":"hierros";
+      h+=`<h3 class="sub">Para tu próximo range</h3><div class="drill"><b>${escH(d.t)}</b><small>Para: ${escH(d.for)}</small><p>${escH(d.why)}</p><ol>${d.steps.map(s=>`<li>${escH(s)}</li>`).join("")}</ol><p class="dm">🔁 ${escH(d.reps)} · 🎯 Funciona si: ${escH(d.check)}</p></div>`+
+        `<div class="row"><button class="ghost primary" id="realPrac" data-f="${focus}">🎥 Practicar esto en el range</button></div>`; } }
+  else if(sw.length>=3) h+=`<p class="note better">✓ Ninguna falla se repitió en la ronda.</p>`;
+  // golpes por hoyo
+  const holes=[...new Set(R.swings.map(w=>w.hole))].sort((a,b)=>a-b);
+  h+=`<h3 class="sub">Golpe a golpe</h3>`+holes.map(n=>{ const hs=R.swings.filter(w=>w.hole===n), par=R.holes[n]?R.holes[n].par:null;
+    return `<p class="note"><b>Hoyo ${n}</b>${par?` · par ${par}`:""} · ${hs.filter(w=>!w.prac).length} golpes</p><div class="realLog">`+hs.map(shotRow).join("")+`</div>`; }).join("")+`<p class="note">Toca un golpe con ▶ para verlo en video, en cámara lenta y con sus líneas.</p>`;
+  if(!live) h+=`<div class="row"><button class="ghost" id="realDel">Borrar esta ronda</button></div>`;
+  return h; }
+// pantalla apagada: negro total (en pantallas OLED casi no gasta) con el último dato; la cámara sigue leyendo
+let realDimOn=false;
+function realDim(on){ realDimOn=!!on; $("realDimmer").hidden=!on; if(on){ $("dimLast").textContent=camState==="on"?"Cámara leyendo":"Cámara apagada"; $("dimSub").textContent="Toca para encender la pantalla"; } }
+$("realDim").addEventListener("click",()=>{ if(camState!=="on" && S.input==="camera") camStart(); realDim(true); });
+$("realDimmer").addEventListener("click",()=>{ realDim(false); if(realLastTag) setTimeout(()=>$("realTag").scrollIntoView({behavior:"smooth",block:"center"}),100); });
+$("realStart").addEventListener("click",realStart);
+$("realEnd").addEventListener("click",()=>{ const b=$("realEnd"); if(!b.dataset.sure){ b.dataset.sure="1"; b.textContent="¿Terminar? Toca otra vez"; setTimeout(()=>{ b.dataset.sure=""; b.textContent="Terminar ronda"; },3000); return; } b.dataset.sure=""; b.textContent="Terminar ronda"; realEnd(); });
+$("realHoleM").addEventListener("click",()=>{ if(!realRound||realRound.hole<=1) return; realRound.hole--; realHoleOf(realRound,realRound.hole); realLastTag=null; realSave(); renderReal(); });
+$("realHoleP").addEventListener("click",()=>{ if(!realRound) return; realRound.hole=Math.min(36,realRound.hole+1); realHoleOf(realRound,realRound.hole); realLastTag=null; realSave(); renderReal(); say(`Hoyo ${realRound.hole}.`); });
+$("realPar").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{ if(!realRound) return; realHoleOf(realRound,realRound.hole).par=+b.dataset.p; realSave(); renderReal(); }));
 
 // ================= Vestuario (maqueta para marcas aliadas) =================
 let outfit=SL.Wardrobe?SL.Wardrobe.normalize(store.get("sl19_outfit",null)):null, wdTab="kits", wdCamWasOn=false;

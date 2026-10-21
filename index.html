@@ -50,8 +50,8 @@ h1 span{color:var(--accent)}
 .pill.ready{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
 .pill.wait{color:var(--warn);border-color:var(--warn)}
 
-.modes{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
-.mode{appearance:none;border:0;background:none;padding:10px 6px;font:700 1.05rem var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);cursor:pointer}
+.modes{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.mode{appearance:none;border:0;background:none;padding:10px 2px;font:700 .92rem var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);cursor:pointer}
 .mode[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 
 .view{position:relative;border-radius:14px;overflow:hidden;height:clamp(300px,56vh,540px);background:#9cc9e6;touch-action:manipulation}
@@ -178,6 +178,31 @@ svg.clk line{stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
 .camBox.big .camTgt{top:76px;left:12px;font-size:.9rem;padding:5px 12px}
 .guideSvg{width:100%;height:auto;color:var(--ink);--fairwayG:#7db353}
 /* vestuario: el campo arriba como vista previa (cámara de estudio) y la hoja de opciones abajo */
+/* en la cancha: solo lo necesario entre golpe y golpe */
+body.m-real #camHelp,body.m-real #quickCal{display:none!important}
+body.m-real .verdict{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.realForm{display:grid;gap:8px;margin:8px 0}.realForm label{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+.realForm input,.realForm select{font:inherit;font-size:1rem;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.realTips{margin:10px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:.86rem;line-height:1.4}
+.realBar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 10px}
+.realHole{display:flex;align-items:center;gap:6px}.realHole div,.realCount{display:flex;flex-direction:column;align-items:center;line-height:1.05}
+.realHole b,.realCount b{font:800 1.5rem var(--display)}.realHole small,.realCount small{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.realHole .ghost{width:36px;height:36px;padding:0;font-size:1.2rem}
+.realKey{margin:8px 0;padding:9px 11px;border-radius:10px;background:var(--deep);color:var(--deep-ink);font-size:.9rem}.realKey:empty{display:none}.realKey b{color:var(--accent)}
+.realTag{border:2px solid var(--accent);border-radius:12px;padding:10px;margin:8px 0;background:var(--surface);display:flex;flex-direction:column;gap:8px}
+.realTag .tt{display:flex;justify-content:space-between;gap:8px;font-size:.9rem}.realTag .tt span{color:var(--muted);font-size:.8rem}
+.realTag .tg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.realTag .tg button{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:11px 4px;font:700 .9rem var(--body);cursor:pointer}
+.realTag .tg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.realTag .prac{appearance:none;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:10px;padding:8px;font:600 .82rem var(--body);cursor:pointer}
+.realTag .prac[aria-pressed="true"]{border-style:solid;color:var(--ink);background:var(--bg)}
+.realLog{display:flex;flex-direction:column;gap:6px}
+.rshot{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:var(--surface);font-size:.85rem;text-align:left;color:var(--ink);cursor:pointer;width:100%}
+.rshot.prac{opacity:.6}.rshot i{font-style:normal;font-size:1.1rem}.rshot small{display:block;color:var(--muted);font-size:.74rem}.rshot em{font-style:normal;font-weight:700;font-size:.8rem;color:var(--muted)}
+.insight{border:1px solid var(--line);border-left:4px solid #3a7bd5;border-radius:10px;padding:8px 11px;margin:6px 0;background:var(--surface);font-size:.88rem;line-height:1.4}
+.insight.warn{border-left-color:#c4553a}.insight.good{border-left-color:#2e9e5b}
+.realDimmer{position:fixed;inset:0;z-index:80;background:#000;color:#6b7d74;display:grid;place-items:center;text-align:center;cursor:pointer}
+.realDimmer b{display:block;font:800 2.2rem var(--display);color:#3f6b55}.realDimmer span{font-size:.85rem}
 .wdBtn{position:absolute;right:10px;bottom:10px;z-index:3;width:44px;height:44px;border-radius:50%;border:0;background:rgba(8,24,18,.72);font-size:1.25rem;line-height:1;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)}
 .wdPreview{display:none}
 .view.studio{position:fixed;left:0;right:0;top:0;height:42vh;border-radius:0;z-index:60}
@@ -351,6 +376,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
   <nav class="modes" aria-label="Modo">
     <button class="mode" data-mode="range" aria-pressed="true">Range</button>
     <button class="mode" data-mode="course" aria-pressed="false">Campo</button>
+    <button class="mode" data-mode="real" aria-pressed="false" title="Para usar en una cancha de verdad">Cancha</button>
     <button class="mode" data-mode="data" aria-pressed="false">Datos</button>
     <button class="mode" data-mode="rank" aria-pressed="false">Ranking</button>
   </nav>
@@ -467,6 +493,39 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
       <button class="ghost primary" id="pracQuick">Empezar</button>
     </div>
     <p class="note"><b>Apunta como en TrackMan:</b> toca el pasto donde quieres que caiga la bola, o toca <b>🎯 Apuntar</b> para elegirlo desde arriba. Con ◀ ▶ afinas la dirección. Cada tiro te dice a cuánto quedaste del objetivo. Las banderas marcan la distancia y cada tiro deja su marca para que veas tu dispersión. Si no tienes los sensores a mano, usa <b>Golpe de prueba</b>.</p>
+  </section>
+
+  <section data-for="real" hidden>
+    <div id="realSetup">
+      <h2>En la cancha</h2>
+      <p class="note">Para una ronda de verdad: apoya el teléfono en la bolsa o en un trípode, enciende la cámara y juega. Cada swing se lee y se guarda con su video; tú marcas con un toque cómo salió la bola. Al final ves qué cambia entre el range y la cancha, qué tienen en común tus tiros malos y qué practicar.</p>
+      <div class="realForm">
+        <label>Cancha<input id="realCourse" list="realCourses" maxlength="40" placeholder="Nombre de la cancha" autocomplete="off"><datalist id="realCourses"></datalist></label>
+        <label>El teléfono te ve<select id="realView"><option value="behind">Desde atrás (en la bolsa, detrás de ti)</option><option value="front">De frente</option></select></label>
+      </div>
+      <button class="go" id="realStart">⛳ Empezar ronda</button>
+      <ul class="realTips">
+        <li><b>Detrás de tus manos, mirando al objetivo</b>, a unos 3 m: así no estorba en el tee y se ve tu ruta. Revisa la imagen con 🔍 antes del primer golpe.</li>
+        <li><b>Swings de práctica:</b> si el micrófono está activo, los swings sin golpe a la bola se marcan solos como práctica. Siempre puedes cambiarlo.</li>
+        <li><b>Batería:</b> la cámara gasta. Usa 🔅 para apagar la pantalla entre golpes (la cámara sigue leyendo) y lleva batería extra.</li>
+        <li>Respeta el ritmo de juego y a los demás: si van rápido, marca el resultado después.</li>
+      </ul>
+    </div>
+    <div id="realLive" hidden>
+      <div class="realBar">
+        <div class="realHole"><button class="ghost" id="realHoleM" aria-label="Hoyo anterior">−</button><div><small>Hoyo</small><b id="realHole">1</b></div><button class="ghost" id="realHoleP" aria-label="Hoyo siguiente">+</button></div>
+        <div class="seg" id="realPar" role="group" aria-label="Par del hoyo"><button data-p="3">Par 3</button><button data-p="4" aria-pressed="true">Par 4</button><button data-p="5">Par 5</button></div>
+        <div class="realCount"><small>Golpes leídos</small><b id="realCount">0</b></div>
+      </div>
+      <div class="realKey" id="realKey"></div>
+      <div class="realTag" id="realTag" hidden aria-live="polite"></div>
+      <h3 class="sub">Este hoyo</h3>
+      <div class="realLog" id="realLog"></div>
+      <div class="row"><button class="ghost" id="realDim">🔅 Pantalla apagada</button><button class="ghost primary" id="realEnd">Terminar ronda</button></div>
+    </div>
+    <div id="realReport"></div>
+    <h3 class="sub" id="realListH" hidden>Tus rondas en la cancha</h3>
+    <div class="pracList" id="realList"></div>
   </section>
 
   <section data-for="rank" hidden>
@@ -643,6 +702,7 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="realDimmer" id="realDimmer" hidden role="button" tabindex="0" aria-label="Encender la pantalla"><div><b id="dimLast">Cámara leyendo</b><span id="dimSub">Toca para encender la pantalla</span></div></div>
 <div class="wardrobe" id="wardrobe" hidden role="dialog" aria-modal="true" aria-labelledby="wdTitle">
   <div class="wdHead"><h2 id="wdTitle">Vestuario</h2><div class="seg" id="wdTabs"><button data-t="kits" aria-pressed="true">Conjuntos</button><button data-t="ropa" aria-pressed="false">Ropa</button><button data-t="marcas" aria-pressed="false">Marcas</button></div><button class="ghost primary" id="wdClose">Listo</button></div>
   <div class="wdBody">
@@ -740,16 +800,16 @@ ol{padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px;font-si
     <button class="go" id="introOk">Entendido</button>
   </div>
 </div>
-<script src="js/engine.js?v=0.19"></script>
-<script src="js/courses.js?v=0.19"></script>
-<script src="js/wardrobe.js?v=0.19"></script>
-<script src="js/world3d.js?v=0.19"></script>
-<script src="js/sound.js?v=0.19"></script>
-<script src="js/camera.js?v=0.19"></script>
-<script src="js/online-config.js?v=0.19"></script>
-<script src="js/online.js?v=0.19"></script>
-<script src="js/vstore.js?v=0.19"></script>
-<script src="js/coach.js?v=0.19"></script>
-<script src="js/app.js?v=0.19"></script>
+<script src="js/engine.js?v=0.20"></script>
+<script src="js/courses.js?v=0.20"></script>
+<script src="js/wardrobe.js?v=0.20"></script>
+<script src="js/world3d.js?v=0.20"></script>
+<script src="js/sound.js?v=0.20"></script>
+<script src="js/camera.js?v=0.20"></script>
+<script src="js/online-config.js?v=0.20"></script>
+<script src="js/online.js?v=0.20"></script>
+<script src="js/vstore.js?v=0.20"></script>
+<script src="js/coach.js?v=0.20"></script>
+<script src="js/app.js?v=0.20"></script>
 </body>
 </html>
