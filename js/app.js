@@ -2,7 +2,7 @@
 (function(){
 "use strict";
 const SL=window.SL, CLUBS=SL.CLUBS, DEG=SL.DEG, World=SL.World;
-const VERSION="0.20";
+const VERSION="0.21";
 const $=id=>document.getElementById(id);
 const store={ get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } },
               set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} } };
@@ -1303,7 +1303,7 @@ async function camStart(){
         if(!r2.error){ res=r2; po.view=g; S.camView=g; saveSettings(); $("camView").value=g; SL.Cam.setView(g); camLayer(true,true);
           SL.Cam.flash(g==="behind"?"Te vi de perfil: cambié a la vista desde atrás":"Te vi de frente: cambié a la vista de frente","wait",2600); } } }
       if(res.error){ camError(res); return; }
-      SL.Cam.diag.last=`${res.view==="behind"?"atrás":"frente"} · manos ${Math.round((res.hand||0)*2.237)} mph · calidad ${res.camQ?res.camQ.level:"–"}`; SL.Cam.diag.lastOk=true;
+      SL.Cam.diag.last=`${res.view==="behind"?"atrás":"frente"} · manos ${Math.round((res.hand||0)*2.237)} mph · calidad ${res.camQ?res.camQ.level:"–"}`+(res.posture&&res.posture.camYaw!=null&&res.view==="behind"?` · cámara girada ${Math.abs(res.posture.camYaw)}°`:""); SL.Cam.diag.lastOk=true;
       // segunda pasada con el impacto que oyó el micrófono (más exacto que el cuadro de video)
       if(SL.Sound && SL.Sound.on){ const hit=SL.Sound.impactFor(res);
         if(hit){ if(hit.t!=null){ const r2=SL.analyzePose(frames, club, Object.assign({tImpact:hit.t, tImpactSrc:hit.src},po)); if(!r2.error) res=r2; } res.heard=true; } }

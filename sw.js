@@ -1,6 +1,6 @@
 // Swing Lab: funciona sin conexión en el campo de práctica
-const CACHE = "swing-lab-v0.20";
-const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.20", "./js/courses.js?v=0.20", "./js/wardrobe.js?v=0.20", "./js/world3d.js?v=0.20", "./js/sound.js?v=0.20", "./js/sound-worklet.js?v=0.20", "./js/camera.js?v=0.20", "./js/online-config.js?v=0.20", "./js/online.js?v=0.20", "./js/vstore.js?v=0.20", "./js/coach.js?v=0.20", "./js/app.js?v=0.20", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
+const CACHE = "swing-lab-v0.21";
+const ASSETS = ["./", "./index.html", "./js/engine.js?v=0.21", "./js/courses.js?v=0.21", "./js/wardrobe.js?v=0.21", "./js/world3d.js?v=0.21", "./js/sound.js?v=0.21", "./js/sound-worklet.js?v=0.21", "./js/camera.js?v=0.21", "./js/online-config.js?v=0.21", "./js/online.js?v=0.21", "./js/vstore.js?v=0.21", "./js/coach.js?v=0.21", "./js/app.js?v=0.21", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

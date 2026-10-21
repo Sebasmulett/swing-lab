@@ -78,9 +78,42 @@ SL.CLUB_LEN={driver:1.16, wood3:1.09, hybrid:1.02, iron5:0.965, iron7:0.94, iron
 SL.BALL_POS={driver:0.10, wood3:0.08, hybrid:0.06, iron5:0.05, iron7:0.03, iron9:0.02, wedge:0.01, gw:0.005, sw:0.0, lw:0.0};
 const HAND_K=1.672;   // con brazo de 0,62 m y driver: palo ≈ 4,8 × manos (golfista promedio: manos 20 mph → palo ~98 mph)
 SL.camRatio=(club, arm=0.62, grip="club")=>{ const L=SL.CLUB_LEN[club]||1; return HAND_K*(arm+L)/arm*(grip==="club"?1:0.92); };
+// ---- vista desde atrás: corrección del ángulo de la cámara ----
+// Lo ideal es la cámara sobre la línea de tiro mirando al objetivo. Si quedó corrida a un lado (girada un ángulo ψ),
+// lo que se mueve a lo largo de la línea (las manos en la subida, la cadera) se "cuela" en la imagen como si fuera
+// hacia la bola o hacia atrás, y el plano, el bucle y la postura salen torcidos. ψ se mide con los pares hombro-hombro,
+// cadera-cadera, rodilla-rodilla y tobillo-tobillo del address (van a lo largo de la línea): su separación en la imagen
+// contra su diferencia de profundidad (coordenadas en metros de MediaPipe). Con ψ se des-gira cada punto:
+// hacia la bola = cos ψ · (imagen) − sin ψ · (profundidad).
+// Además, en la vista de perfil el lado lejano está tapado: hombros y caderas se toman con peso según cuánto se ven.
+function dtlFrames(F){
+  const n=F.length; if(n<10) return F;
+  const W=(f,a,b)=>{ const va=Math.max(0.02,f.v[a]??0)**3, vb=Math.max(0.02,f.v[b]??0)**3; return [(f.p[a][0]*va+f.p[b][0]*vb)/(va+vb),(f.p[a][1]*va+f.p[b][1]*vb)/(va+vb)]; };
+  // lado de la bola en la imagen y escala (m por píxel) de los primeros cuadros (address)
+  const A=F.slice(0,Math.max(6,Math.floor(n*0.35)));
+  const out=Math.sign(median(A.map(f=>mid(f.p.lw,f.p.rw)[0]-mid(f.p.lh,f.p.rh)[0])))||1;
+  const mpp=median(A.map(f=>{ if(!f.m||!f.m.ls||!f.m.lh) return NaN; const sm=[(f.m.ls[1]+f.m.rs[1])/2], hm=[(f.m.lh[1]+f.m.rh[1])/2]; const px=Math.abs(mid(f.p.ls,f.p.rs)[1]-mid(f.p.lh,f.p.rh)[1]); return px>5?Math.abs(sm[0]-hm[0])/px:NaN; }));
+  let psi=0;
+  if(isFinite(mpp) && mpp>0.0005 && mpp<0.02){
+    const est=[]; for(const f of A){ if(!f.m) continue;
+      for(const [a,b] of [["ls","rs"],["lh","rh"],["lk","rk"],["la","ra"]]){ if(!f.m[a]||!f.m[b]||!f.p[a]||!f.p[b]) continue;
+        const dd=f.m[b][2]-f.m[a][2], du=(f.p[b][0]-f.p[a][0])*out*mpp; if(Math.hypot(dd,du)<0.15) continue;   // par muy corto: no sirve
+        est.push(Math.atan2(du*Math.sign(dd||1), Math.abs(dd))); } }
+    if(est.length>=6) psi=clamp(median(est),-40*DEG,40*DEG); }
+  DTL_DIAG.psi=psi/DEG;
+  const c=Math.cos(psi), s=Math.sin(psi), fix=Math.abs(psi)>=5*DEG;
+  return F.map(f=>{ const g=Object.assign({},f,{p:Object.assign({},f.p), p0:f.p});
+    if(fix && f.m){ const hx=mid(f.p.lh,f.p.rh)[0], hd=f.m.lh&&f.m.rh?(f.m.lh[2]+f.m.rh[2])/2:0;
+      for(const k in f.p){ const q=f.p[k], M=f.m[k]; if(!q||!M) continue; const u=(q[0]-hx)*out*mpp, d=M[2]-hd; g.p[k]=[hx+out*(c*u-s*d)/mpp, q[1]]; } }
+    // hombros y caderas: el lado que se ve manda (se ponen los dos en ese punto para que el punto medio sea el bueno)
+    for(const [a,b] of [["ls","rs"],["lh","rh"]]){ if(!g.p[a]||!g.p[b]) continue; const w=W({p:g.p,v:f.v},a,b); g.p[a]=w; g.p[b]=w; }
+    return g; });
+}
+const DTL_DIAG={}; SL._dtlDiag=DTL_DIAG;
 SL.analyzePose=function(F, clubKey, opts={}){
   const grip=opts.grip||"empty", view=opts.view||"front";
   F=F.filter(f=>f && f.p && f.p.lw).map(fixWrists);
+  if(view==="behind") F=dtlFrames(F);
   if(F.length<15) return {error:"La cámara no captó suficientes cuadros del swing. Revisa la luz y que se vea todo tu cuerpo.", code:"few"};
   const n=F.length;
   // tiempos: si vienen del bucle de pantalla (con retraso variable) y no hubo cuadros perdidos, se regularizan
@@ -225,6 +258,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
   pen(vis>=0.8?1:vis>=0.6?0.85:0.65, "las manos se ven poco en la bajada (luz o ropa del mismo color del fondo)");
   if(eModel && e2dImp){ const dis=Math.abs(eModel/e2dImp-1); pen(dis<0.15?1:dis<0.3?0.85:0.7, "el movimiento fue irregular para la cámara"); }
   if(view!=="front") pen(impSrc==="sonido"?0.93:0.88, "desde atrás la velocidad es un poco menos precisa que de frente");
+  if(view==="behind" && Math.abs(DTL_DIAG.psi||0)>=12) pen(Math.abs(DTL_DIAG.psi)>=25?0.85:0.93, `la cámara quedó girada ${Math.round(Math.abs(DTL_DIAG.psi))}° respecto a la línea de tiro (lo corregí, pero lo ideal es ponerla justo detrás de tus manos, mirando al objetivo)`);
   if(view==="front" && handPeakMs!=null && (handPeakMs<-35 || handPeakMs>230)) pen(0.85, "la velocidad de tus manos no tuvo su pico justo antes del impacto, como es normal: pudo fallar la lectura");
   if(opts.shutter===false && fps<27) pen(0.95, "con poca luz el teléfono alarga la exposición y baja los cuadros por segundo: busca más luz");
   reasons.sort((x,y)=>x[0]-y[0]);
@@ -265,7 +299,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
         const d=[]; for(let k=0;k<=10;k++){ const sv=sTop*(0.25+0.5*k/10), pb=at(bk,sv,true), pd=at(dn,sv,false); if(pb!=null && pd!=null) d.push(pd-pb); }
         if(d.length>=6) loop=median(d)*mPerPx*100; } }
     posture={dtl:true, spine:Math.round(spineA), spineChg:Math.round(spineI-spineA), hipThrust:Math.round(hipThrust), headDrop:Math.round(headDrop), headIn:Math.round(headIn), planeTop:Math.round(planeTop), loop:loop==null?null:Math.round(loop),
-      lines:{hand:L0, sh:L1, hip:Hp[a]}};
+      lines:F[a].p0?{hand:mid(F[a].p0.lw,F[a].p0.rw), sh:mid(F[a].p0.ls,F[a].p0.rs), hip:mid(F[a].p0.lh,F[a].p0.rh)}:{hand:L0, sh:L1, hip:Hp[a]}, camYaw:Math.round(DTL_DIAG.psi||0)};
   }
   const arcTop=Math.round(ang[top]/DEG), arcFin=Math.round((view==="behind"?ang[fin]:-ang[fin])/DEG);
   const i0=Math.max(a,st-4), i1=Math.min(n-1,fin+4);
@@ -279,7 +313,7 @@ SL.analyzePose=function(F, clubKey, opts={}){
     posture, camQ, hz:Math.round(fps), impSrc, tImpAbs:tImp, tTopAbs:t[top], handPeakMs, handDrop:handDrop==null?null:+handDrop.toFixed(2),
     trace:{ t:t.slice(i0,i1+1).map(v=>v-t[i0]), d:ang.slice(i0,i1+1).map(v=>v/DEG), phi:ang.slice(i0,i1+1).map(v=>+(v/DEG).toFixed(1)),
             start:st-i0, top:top-i0, imp:imp-i0, fin:fin-i0, signed:true },
-    poseFrames: F.slice(Math.max(0,a-8), Math.min(n,fin+10)).map(f=>({t:f.t, w:f.w, h:f.h, p:f.p, img:f.img||null})),
+    poseFrames: F.slice(Math.max(0,a-8), Math.min(n,fin+10)).map(f=>({t:f.t, w:f.w, h:f.h, p:f.p0||f.p, img:f.img||null})),
     marks:{a, st, top, imp, fin, t0:F[Math.max(0,a-8)].t}
   };
 };
@@ -489,7 +523,7 @@ function setupHint(f){
     if((f.v.la??0)>0.5 && (f.v.ra??0)>0.5 && p.la && p.ra){ const out=Math.sign(mid(p.lw,p.rw)[0]-mid(p.lh,p.rh)[0])||1, far=p.la[1]<p.ra[1]?p.la:p.ra, near=far===p.la?p.ra:p.la, k=(far[0]-near[0])*out/tor;
       if(k>0.5) return "Corre el teléfono un poco hacia tu lado: debe quedar sobre la línea de tiro, detrás de tus manos";
       if(k<-0.25) return "Corre el teléfono un poco hacia la bola: debe quedar sobre la línea de tiro, detrás de tus manos"; } }
-  if(Cam.tilt!=null && Math.abs(Cam.tilt)>7) return `Endereza el teléfono: está ladeado ${Math.round(Math.abs(Cam.tilt))}°`;
+  if(Cam.tilt!=null && Math.abs(Cam.tilt)>5) return `Endereza el teléfono: está ladeado ${Math.round(Math.abs(Cam.tilt))}°`;
   return null; }
 // máquina de estados: buscar cuerpo → quieto en address → swing → final
 // Solo se dispara desde "listo" (quieto en address): caminar o acomodarse ya no se confunde con un swing.
